@@ -59,4 +59,4 @@ const COUNTRIES = [
   { code: 'OM', name: 'عُمان', flag: '🇴🇲' },
   { code: 'HS', name: 'إمارة حائل', flag: '🏴' },
 ];
-module.exports = COUNTRIES;
+module.exports = { COUNTRIES };
