@@ -400,9 +400,123 @@ async function vNews() {
   renderWarTable(rows);
   renderBriefs(rows);
 }
+let THREE_PROMISE = null;
+function loadThree(ok, fail) {
+  if (window.THREE) return ok();
+  if (!THREE_PROMISE) {
+    THREE_PROMISE = new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/0.149.0/three.min.js';
+      s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+  }
+  THREE_PROMISE.then(ok).catch(fail);
+}
+function latLonToVec3(lat, lon, r) {
+  const la = lat * Math.PI / 180, lo = lon * Math.PI / 180;
+  return new THREE.Vector3(r * Math.cos(la) * Math.cos(lo), r * Math.sin(la), -r * Math.cos(la) * Math.sin(lo));
+}
+function makeGlowTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(32, 32, 2, 32, 32, 30);
+  g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.4, 'rgba(255,255,255,.55)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+}
 function initGlobe(rows) {
   const cv = document.getElementById('wglobe'); if (!cv) return;
-  const ctx = cv.getContext('2d');
+  loadThree(() => { try { initGlobe3D(cv, rows); } catch (e) { initGlobeFallback(cv, rows); } },
+            () => initGlobeFallback(cv, rows));
+}
+function initGlobe3D(cv, rows) {
+  const holder = cv.parentElement;
+  const renderer = new THREE.WebGLRenderer({ canvas: cv, alpha: true, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 200);
+  camera.position.set(0, 0, 3.05);
+  const globe = new THREE.Group();
+  scene.add(globe);
+  // الأرض بخامة الأقمار الصناعية الليلية
+  const earthTex = new THREE.TextureLoader().load('/textures/earth-night.jpg');
+  globe.add(new THREE.Mesh(
+    new THREE.SphereGeometry(1, 72, 72),
+    new THREE.MeshBasicMaterial({ map: earthTex })
+  ));
+  // توهج الغلاف الجوي
+  const atm = new THREE.Mesh(
+    new THREE.SphereGeometry(1.16, 72, 72),
+    new THREE.ShaderMaterial({
+      uniforms: { c: { value: new THREE.Color(0x2a7fd4) } },
+      vertexShader: 'varying vec3 vN; void main(){ vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: 'varying vec3 vN; uniform vec3 c; void main(){ float i = pow(max(0.0, 0.66 - dot(vN, vec3(0.0, 0.0, 1.0))), 3.0); gl_FragColor = vec4(c, 1.0) * i; }',
+      blending: THREE.AdditiveBlending, side: THREE.BackSide, transparent: true, depthWrite: false,
+    })
+  );
+  globe.add(atm);
+  // نجوم
+  const sp = [];
+  for (let i = 0; i < 500; i++) {
+    const v = new THREE.Vector3(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1);
+    if (v.lengthSq() > 1 || v.lengthSq() < 0.01) { i--; continue; }
+    v.normalize().multiplyScalar(25 + Math.random() * 40);
+    sp.push(v.x, v.y, v.z);
+  }
+  const starGeo = new THREE.BufferGeometry();
+  starGeo.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
+  scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0x8aa8c8, size: 0.09, transparent: true, opacity: 0.75 })));
+  // علامات الدول المشتعلة
+  const SEVC = { RED: 0xf4212e, ORANGE: 0xff9f0a, YELLOW: 0xffd400 };
+  const glowTex = makeGlowTexture();
+  const markers = [];
+  rows.forEach((r) => {
+    if (r.lat == null || r.lon == null) return;
+    const col = SEVC[r.severity] || 0xffd400;
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: col, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.9 }));
+    halo.position.copy(latLonToVec3(r.lat, r.lon, 1.004));
+    halo.scale.setScalar(0.22);
+    const core = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xffffff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+    core.position.copy(halo.position);
+    core.scale.setScalar(0.07);
+    globe.add(halo); globe.add(core);
+    markers.push({ halo, phase: Math.random() * 6.28 });
+  });
+  // ابدأ موجهًا نحو الشرق الأوسط/أوروبا
+  globe.rotation.y = -2.094; globe.rotation.x = 0.18;
+  let dragging = false, px = 0, py = 0, autoV = 0.0016;
+  cv.style.touchAction = 'pan-y';
+  cv.addEventListener('pointerdown', (e) => { dragging = true; px = e.clientX; py = e.clientY; });
+  window.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    globe.rotation.y += (e.clientX - px) * 0.006;
+    globe.rotation.x = Math.max(-0.7, Math.min(0.7, globe.rotation.x + (e.clientY - py) * 0.003));
+    px = e.clientX; py = e.clientY;
+  });
+  window.addEventListener('pointerup', () => { dragging = false; });
+  const resize = () => {
+    const w = Math.max(1, holder.clientWidth), h = Math.max(1, holder.clientHeight);
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h; camera.updateProjectionMatrix();
+  };
+  resize(); window.addEventListener('resize', resize);
+  const clock = new THREE.Clock();
+  (function tick() {
+    if (!document.body.contains(cv)) { renderer.dispose(); return; }
+    const t = clock.getElapsedTime();
+    if (!dragging) globe.rotation.y += autoV;
+    markers.forEach((m) => {
+      const p = (Math.sin(t * 2.4 + m.phase) + 1) / 2;
+      m.halo.scale.setScalar(0.18 + p * 0.14);
+      m.halo.material.opacity = 0.55 + p * 0.45;
+    });
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+  })();
+}
+// بديل بسيط لو تعذّر تحميل Three.js
+function initGlobeFallback(cv, rows) {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   let W = 0, H = 0, R = 0;
   const fit = () => {
