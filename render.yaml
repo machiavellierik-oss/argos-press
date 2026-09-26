@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: argos-press
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    plan: free
