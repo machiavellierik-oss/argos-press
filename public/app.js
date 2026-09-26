@@ -380,8 +380,10 @@ async function vCat(cat) {
 const AR_MONTHS = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
 const GAME_MONTH_MS = 2 * 3600 * 1000;
 function gameDateOf(startedAt, nowMs) {
-  const m = Math.max(0, Math.floor((nowMs - startedAt) / GAME_MONTH_MS));
-  return { year: 1900 + Math.floor(m / 12), month: (m % 12) + 1 };
+  const elapsed = Math.max(0, nowMs - startedAt);
+  const m = Math.floor(elapsed / GAME_MONTH_MS);
+  const day = Math.floor((elapsed % GAME_MONTH_MS) / GAME_MONTH_MS * 30) + 1; // 1..30
+  return { year: 1900 + Math.floor(m / 12), month: (m % 12) + 1, day };
 }
 function fmtGMT(ts) {
   return new Intl.DateTimeFormat('ar', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date(ts)) + ' GMT';
@@ -400,7 +402,7 @@ async function mountClock(el) {
     let game = '—', status = '⏸️ الساعة متوقفة — بانتظار تشغيل المطورين';
     if (clockState && clockState.running && clockState.started_at) {
       const g = gameDateOf(clockState.started_at, now);
-      game = `${AR_MONTHS[g.month - 1]} ${g.year}`;
+      game = `${g.day} ${AR_MONTHS[g.month - 1]} ${g.year}`;
       status = '🟢 اللعبة جارية';
     }
     el.innerHTML = `<div class="clock-box">
@@ -411,6 +413,7 @@ async function mountClock(el) {
       ${me && me.role === 'developer' ? `<div class="clock-ctl">
         <button class="btn" style="width:auto;padding:8px 22px" onclick="clockStart()">▶ تشغيل الساعة</button>
         <button class="btn ghost" style="width:auto;padding:8px 22px" onclick="clockStop()">⏸ إيقاف</button>
+        <button class="btn danger" style="width:auto;padding:8px 22px" onclick="clockReset()">↺ إعادة التعيين</button>
       </div>` : ''}
     </div>`;
   };
@@ -426,6 +429,11 @@ async function clockStart() {
 }
 async function clockStop() {
   try { clockState = await api('POST', '/clock/stop'); }
+  catch (e) { alert(e.message); }
+}
+async function clockReset() {
+  if (!confirm('إعادة تعيين الساعة؟ سيعود زمن اللعبة إلى الصفر (1 يناير 1900) ويعمل من جديد.')) return;
+  try { clockState = await api('POST', '/clock/reset'); alert('أُعيد التعيين ✓ — زمن اللعبة عاد إلى 1 يناير 1900'); }
   catch (e) { alert(e.message); }
 }
 // ---------- غرفة الحرب (خريطة الصراع) ----------

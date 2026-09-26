@@ -28,8 +28,10 @@ const CATEGORIES = {
 const GAME_EPOCH_REAL = Date.UTC(2026, 8, 27, 18, 0, 0);
 const GAME_MONTH_MS = 2 * 3600 * 1000;
 function gameDateOf(startedAt, nowMs) {
-  const m = Math.max(0, Math.floor((nowMs - startedAt) / GAME_MONTH_MS));
-  return { year: 1900 + Math.floor(m / 12), month: (m % 12) + 1 };
+  const elapsed = Math.max(0, nowMs - startedAt);
+  const m = Math.floor(elapsed / GAME_MONTH_MS);
+  const day = Math.floor((elapsed % GAME_MONTH_MS) / GAME_MONTH_MS * 30) + 1; // 1..30
+  return { year: 1900 + Math.floor(m / 12), month: (m % 12) + 1, day };
 }
 
 // مهارات العملاء (مصفوفة المهارات في الملف الاستخباراتي)
@@ -556,6 +558,12 @@ app.post('/api/clock/start', ah(auth), requireDeveloper, ah(async (req, res) => 
 app.post('/api/clock/stop', ah(auth), requireDeveloper, ah(async (req, res) => {
   await q('UPDATE game_clock SET running=0, updated_by=$1 WHERE id=1', [req.user.id]);
   res.json({ ok: true, running: false });
+}));
+// إعادة التعيين: يعود زمن اللعبة إلى الصفر (يناير 1900) ويعمل من جديد
+app.post('/api/clock/reset', ah(auth), requireDeveloper, ah(async (req, res) => {
+  const now = Date.now();
+  await q('UPDATE game_clock SET started_at=$1, running=1, updated_by=$2 WHERE id=1', [now, req.user.id]);
+  res.json({ ok: true, running: true, started_at: now, game: gameDateOf(now, now) });
 }));
 
 // ---------- رفع صورة ----------
