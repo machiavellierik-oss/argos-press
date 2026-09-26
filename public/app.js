@@ -72,7 +72,7 @@ async function vHome() {
   if (official[0]) {
     const a = official[0], c = countryOf(a.author.country_code);
     h += `<div class="hero" onclick="location.hash='#/article/${a.id}'">
-      ${a.image ? `<img src="${esc(a.image)}" alt="">` : ''}
+      ${a.image ? `<img src="${esc(a.image)}" alt="">` : `<div class="hero-ph"></div>`}
       <div class="hero-tx">
         <span class="badge gold">بيان رسمي</span>
         <h2>${esc(a.title)}</h2>
