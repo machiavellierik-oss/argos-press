@@ -1,12 +1,9 @@
-// جريدة أرجوس — واجهة التطبيق
+// أرجوس — واجهة بأسلوب X
 const CATS = { official: 'بيانات رسمية', war: 'سيناريوهات الحروب', events: 'أحداث اللعبة' };
 const SKILLS = {
-  intel: 'الاستخبارات والتجسس',
-  diplomacy: 'التفاوض والتحالفات',
-  econwar: 'الحرب الاقتصادية والدبلوماسية',
-  analysis: 'التحليل الجيوسياسي',
-  planning: 'التخطيط طويل المدى وإدارة الأزمات',
-  resources: 'إدارة الموارد وتحليل البيانات',
+  intel: 'الاستخبارات والتجسس', diplomacy: 'التفاوض والتحالفات',
+  econwar: 'الحرب الاقتصادية والدبلوماسية', analysis: 'التحليل الجيوسياسي',
+  planning: 'التخطيط طويل المدى وإدارة الأزمات', resources: 'إدارة الموارد وتحليل البيانات',
 };
 const CLEARANCE_DESC = {
   'LEVEL 1': 'FIELD OPERATIVE', 'LEVEL 2': 'TACTICAL CLEARANCE', 'LEVEL 3': 'OPERATIONAL COMMAND',
@@ -16,13 +13,38 @@ const STATUS_AR = { ACTIVE: 'نشط', INACTIVE: 'غير نشط', MIA: 'مفقو�
 let COUNTRIES = [], CMAP = {}, me = null;
 const app = document.getElementById('app');
 
+// ---------- أيقونات SVG ----------
+const I = (p, fill) => `<svg viewBox="0 0 24 24" fill="${fill ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const ICONS = {
+  home: I('<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h5v-6h4v6h5V9.5"/>'),
+  chat: I('<path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z"/>'),
+  mega: I('<path d="M3 11v3l4 .5V10.5L3 11z"/><path d="M7 10.5 18 5v13l-11-3.5"/><path d="M18 8.5a3 3 0 0 1 0 6"/>'),
+  zap: I('<path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/>'),
+  cal: I('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>'),
+  folder: I('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>'),
+  user: I('<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/>'),
+  feather: I('<path d="M20 4c-6 0-12 4-14 12l-2 4 4-2c8-2 12-8 12-14z"/><path d="M6 18 16 8"/>'),
+  heart: (f) => `<svg viewBox="0 0 24 24" fill="${f ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21C7 16.5 3 13 3 8.8 3 6 5.2 4 7.8 4c1.7 0 3.2.9 4.2 2.3C13 5 14.5 4 16.2 4 18.8 4 21 6 21 8.8c0 4.2-4 7.7-9 12.2z"/></svg>`,
+  repost: I('<path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>'),
+  reply: I('<path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z"/>'),
+  share: I('<path d="M12 15V3M7 8l5-5 5 5"/><path d="M5 12v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-8"/>'),
+  views: I('<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/>'),
+  search: I('<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>'),
+  trash: I('<path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/>'),
+  img: I('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 18l5-5 3 3 4-4 4 4"/>'),
+  back: I('<path d="M19 12H5M11 6l-6 6 6 6"/>'),
+  dots: I('<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>'),
+  check: `<svg class="vbadge" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 2.4 3.4-.5.9 3.3 3 1.7-1.4 3.1 1.4 3.1-3 1.7-.9 3.3-3.4-.5L12 22l-2.4-2.4-3.4.5-.9-3.3-3-1.7L3.7 12 2.3 8.9l3-1.7.9-3.3 3.4.5L12 2z"/><path d="M10.6 14.6l-2.1-2.1-1.4 1.4 3.5 3.5 7-7-1.4-1.4z" fill="#000"/></svg>`,
+  checkGold: `<svg class="vbadge gold" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 2.4 3.4-.5.9 3.3 3 1.7-1.4 3.1 1.4 3.1-3 1.7-.9 3.3-3.4-.5L12 22l-2.4-2.4-3.4.5-.9-3.3-3-1.7L3.7 12 2.3 8.9l3-1.7.9-3.3 3.4.5L12 2z"/><path d="M10.6 14.6l-2.1-2.1-1.4 1.4 3.5 3.5 7-7-1.4-1.4z" fill="#000"/></svg>`,
+};
+
 // ---------- أدوات ----------
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 function timeAgo(ts) {
   const s = Math.floor((Date.now() - ts) / 1000);
   if (s < 60) return 'الآن';
-  const m = Math.floor(s / 60); if (m < 60) return `منذ ${m} دقيقة`;
-  const h = Math.floor(m / 60); if (h < 24) return `منذ ${h} ساعة`;
+  const m = Math.floor(s / 60); if (m < 60) return `منذ ${m} د`;
+  const h = Math.floor(m / 60); if (h < 24) return `منذ ${h} س`;
   const d = Math.floor(h / 24); if (d < 30) return `منذ ${d} يوم`;
   return new Date(ts).toLocaleDateString('ar');
 }
@@ -32,8 +54,7 @@ function countryOf(code) {
 }
 async function api(method, url, body) {
   const r = await fetch('/api' + url, {
-    method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
+    method, headers: body ? { 'Content-Type': 'application/json' } : {},
     body: body ? JSON.stringify(body) : undefined,
   });
   const j = await r.json().catch(() => ({}));
@@ -48,303 +69,305 @@ async function uploadImage(file) {
   return j.url;
 }
 const excerpt = (t, n = 140) => t.length > n ? t.slice(0, n) + '…' : t;
+const val = (id) => document.getElementById(id).value.trim();
+function msg(t, ok) {
+  const el = document.getElementById('msg');
+  if (el) el.innerHTML = `<div class="${ok ? 'okmsg' : 'err'}">${esc(t)}</div>`;
+}
+// إعجابات محلية
+const likeStore = {
+  get() { try { return JSON.parse(localStorage.getItem('argos_likes') || '{}'); } catch (e) { return {}; } },
+  has(k) { return !!this.get()[k]; },
+  toggle(k) { const s = this.get(); s[k] ? delete s[k] : s[k] = 1; localStorage.setItem('argos_likes', JSON.stringify(s)); return !!s[k]; },
+};
+const baseCount = (id, salt) => { let x = (id * 2654435761 + salt * 40503) % 997; return x < 0 ? -x : x; };
+const fmtN = (n) => n >= 1000 ? (n / 1000).toFixed(1).replace('.0', '') + 'K' : String(n);
 
-// ---------- الترويسة ----------
-function renderTop() {
-  document.getElementById('today').textContent =
-    new Date().toLocaleDateString('ar', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-  const ub = document.getElementById('userbox');
+// ---------- القائمة الجانبية والودجت ----------
+const NAV = [
+  ['#/', 'الرئيسية', 'home'],
+  ['#/dispatches', 'البرقيات', 'chat'],
+  ['#/cat/official', 'بيانات رسمية', 'mega'],
+  ['#/cat/war', 'سيناريوهات الحروب', 'zap'],
+  ['#/cat/events', 'أحداث اللعبة', 'cal'],
+  ['#/dossiers', 'ملفات العملاء', 'folder'],
+];
+function renderNav(active) {
+  const nav = document.getElementById('mainnav');
+  const dashLink = me ? ['#/dash', 'حسابي', 'user'] : ['#/login', 'دخول', 'user'];
+  nav.innerHTML = [...NAV, dashLink].map(([h, t, ic]) =>
+    `<a class="nav-link${h === active ? ' active' : ''}" href="${h}">${ICONS[ic]}<span>${t}</span></a>`).join('');
+  const bn = document.getElementById('bottomnav');
+  bn.innerHTML = [...NAV.slice(0, 2), ['#/dossiers', '', 'folder'], dashLink].map(([h, , ic]) =>
+    `<a class="${h === active ? 'active' : ''}" href="${h}">${ICONS[ic]}</a>`).join('');
+  document.querySelector('.cb-ic').innerHTML = ICONS.feather;
+  document.getElementById('composeBtn').onclick = () => {
+    location.hash = me ? '#/dash' : '#/login';
+    if (me) setTimeout(() => dashTab('new-d'), 350);
+  };
+  const nu = document.getElementById('navuser');
   if (me) {
     const c = countryOf(me.country_code);
-    ub.innerHTML = `${c.flag} <a href="#/dash">${esc(me.username)}</a> <a href="#" id="logout">خروج</a>`;
-    document.getElementById('logout').onclick = async (e) => {
-      e.preventDefault(); await api('POST', '/logout'); me = null; location.hash = '#/'; renderTop(); route();
+    nu.innerHTML = `<button class="nav-user" id="nuBtn">
+      <span class="av">${c.flag}</span>
+      <span class="nu-tx"><span class="nu-name">${esc(me.username)}</span><br><span class="nu-handle">@${esc(me.username)}</span></span>
+      <span class="nu-go">···</span></button>`;
+    document.getElementById('nuBtn').onclick = async () => {
+      if (confirm('تسجيل الخروج؟')) { await api('POST', '/logout'); me = null; location.hash = '#/'; boot(false); }
     };
   } else {
-    ub.innerHTML = `<a href="#/login">دخول</a> | <a href="#/register">إنشاء حساب</a>`;
+    nu.innerHTML = '';
   }
-  const nav = document.getElementById('mainnav');
-  const links = [
-    ['#/', 'الرئيسية'], ['#/cat/official', 'بيانات رسمية'], ['#/cat/war', 'سيناريوهات الحروب'],
-    ['#/cat/events', 'أحداث اللعبة'], ['#/dispatches', 'برقيات الدول'], ['#/dossiers', 'ملفات العملاء'],
-    ...(me ? [['#/dash', 'لوحة التحكم']] : []),
-  ];
-  nav.innerHTML = links.map(([h, t]) => `<a href="${h}">${t}</a>`).join('');
+}
+function renderWidgets() {
+  document.getElementById('wsearch').innerHTML = `<div class="s-box">${ICONS.search}
+    <input id="winput" placeholder="بحث في أرجوس"></div>`;
+  document.getElementById('winput').addEventListener('input', (e) => {
+    const q = e.target.value.trim();
+    document.querySelectorAll('.tweet .tw-body, .acard h3, .acard p').forEach(() => {});
+    document.querySelectorAll('.tweet, .acard').forEach((el) => {
+      el.style.display = !q || el.textContent.includes(q) ? '' : 'none';
+    });
+  });
+  document.getElementById('wtrends').innerHTML = `<h3>الأكثر تداولًا في أرجوس</h3>` +
+    Object.entries(CATS).map(([k, v]) => `<a class="w-trend" href="#/cat/${k}">
+      <div class="t-cat">قسم المحاكاة</div><div class="t-name">${v}</div>
+      <div class="t-n">آخر التطورات لحظة بلحظة</div></a>`).join('') +
+    `<a class="w-more" href="#/dispatches">عرض برقيات الدول</a>`;
+  api('GET', '/dossiers').then((list) => {
+    const el = document.getElementById('wusers');
+    if (!list.length) { el.innerHTML = ''; return; }
+    el.innerHTML = `<h3>ملفات مقترحة</h3>` + list.slice(0, 3).map((d) => {
+      const c = countryOf(d.country_code);
+      return `<div class="w-user" onclick="location.hash='#/dossier/${esc(d.username)}'">
+        <span class="av">${d.avatar ? `<img src="${esc(d.avatar)}">` : c.flag}</span>
+        <span class="wu-tx"><span class="wu-n">${esc(d.username)}</span><br><span class="wu-h">@${esc(d.username)}</span></span>
+      </div>`;
+    }).join('') + `<a class="w-more" href="#/dossiers">عرض الكل</a>`;
+  }).catch(() => {});
 }
 
-// ---------- الصفحة الرئيسية ----------
-async function vHome() {
-  app.innerHTML = '<p class="empty">جارٍ تحميل العدد…</p>';
-  const [official, war, events, dispatches, dossiers] = await Promise.all([
-    api('GET', '/articles?category=official&limit=1'),
-    api('GET', '/articles?category=war&limit=3'),
-    api('GET', '/articles?category=events&limit=3'),
-    api('GET', '/dispatches?limit=4'),
-    api('GET', '/dossiers'),
-  ]);
-  let h = '';
-  if (official[0]) {
-    const a = official[0], c = countryOf(a.author.country_code);
-    h += `<div class="hero" onclick="location.hash='#/article/${a.id}'">
-      ${a.image ? `<img src="${esc(a.image)}" alt="">` : `<div class="hero-ph"></div>`}
-      <div class="hero-tx">
-        <span class="badge gold">بيان رسمي</span>
-        <h2>${esc(a.title)}</h2>
-        <p>${esc(excerpt(a.body, 200))}</p>
-        <div class="meta">${c.flag} ${esc(c.name)} · ${timeAgo(a.created_at)}</div>
-      </div></div>`;
-  }
-  const sec = (title, items, cat) => items.length ? `
-    <div class="sec-head"><h2>${title}</h2><a class="more" href="#/cat/${cat}">المزيد ←</a></div>
-    <div class="grid">${items.map(cardHTML).join('')}</div>` : '';
-  h += sec('سيناريوهات الحروب', war, 'war');
-  h += sec('أحداث اللعبة', events, 'events');
-  if (dispatches.length) {
-    h += `<div class="sec-head"><h2>أحدث برقيات الدول</h2><a class="more" href="#/dispatches">الكل ←</a></div>`;
-    h += dispatches.map(dispatchHTML).join('');
-  }
-  if (dossiers.length) {
-    h += `<div class="sec-head"><h2>ملفات العملاء</h2><a class="more" href="#/dossiers">الكل ←</a></div>
-      <div class="grid">${dossiers.slice(0, 3).map(dossierCardHTML).join('')}</div>`;
-  }
-  app.innerHTML = h || '<p class="empty">لا توجد أخبار بعد.</p>';
-}
-function cardHTML(a) {
-  const c = countryOf(a.author.country_code);
-  return `<div class="card" onclick="location.hash='#/article/${a.id}'">
-    ${a.image ? `<img src="${esc(a.image)}" alt="" loading="lazy">` : ''}
-    <div class="card-tx">
-      <span class="badge">${esc(a.category_label)}</span>
-      <h3>${esc(a.title)}</h3>
-      <p>${esc(excerpt(a.body))}</p>
-      <div class="meta"><span class="country-flag">${c.flag}</span> ${esc(c.name)} · ${timeAgo(a.created_at)}</div>
-    </div></div>`;
-}
-function dispatchHTML(d) {
+// ---------- مكوّن التغريدة ----------
+function tweetHTML(d) {
   const c = countryOf(d.author.country_code);
-  return `<div class="dispatch">
-    <div class="d-head">
-      <span class="d-flag">${c.flag}</span>
-      <div><div class="d-country">${esc(c.name)} <span class="stamp">برقية رسمية</span></div>
-      <div class="d-user">@${esc(d.author.username)}</div></div>
-      <span class="d-time">${timeAgo(d.created_at)}</span>
+  const canDel = me && (me.id === d.author.id || me.role === 'admin');
+  const lk = 'd' + d.id, liked = likeStore.has(lk);
+  const likes = baseCount(d.id, 7) + (liked ? 1 : 0);
+  const views = fmtN(baseCount(d.id, 13) + 40);
+  const isHQ = d.author.country_code === 'HQ';
+  return `<article class="tweet" data-kind="d" data-id="${d.id}">
+    <span class="av">${c.flag}</span>
+    <div class="tw-main">
+      <div class="tw-head">
+        <span class="tw-name">${esc(c.name)}</span>${isHQ ? ICONS.checkGold : ICONS.check}
+        <span class="tw-handle">@${esc(d.author.username)} · ${timeAgo(d.created_at)}</span>
+        ${canDel ? `<button class="tw-del" data-del-d="${d.id}" title="حذف">${ICONS.trash}</button>` : ''}
+      </div>
+      <div class="tw-body">${esc(d.body)}</div>
+      ${d.image ? `<img class="tw-img" src="${esc(d.image)}" loading="lazy" alt="">` : ''}
+      <div class="tw-actions">
+        <button class="tw-act reply" data-go="#/dash">${'<span class="a-ic">' + ICONS.reply + '</span>'}<span>${fmtN(baseCount(d.id, 3))}</span></button>
+        <button class="tw-act repost" data-repost="${d.id}">${'<span class="a-ic">' + ICONS.repost + '</span>'}<span>${fmtN(baseCount(d.id, 5))}</span></button>
+        <button class="tw-act like${liked ? ' on' : ''}" data-like="${lk}">${'<span class="a-ic">' + ICONS.heart(liked) + '</span>'}<span>${fmtN(likes)}</span></button>
+        <button class="tw-act views">${'<span class="a-ic">' + ICONS.views + '</span>'}<span>${views}</span></button>
+        <button class="tw-act share" data-share-d="${d.id}">${'<span class="a-ic">' + ICONS.share + '</span>'}</button>
+      </div>
     </div>
-    <p>${esc(d.body)}</p>
-    ${d.image ? `<img src="${esc(d.image)}" alt="" loading="lazy">` : ''}
+  </article>`;
+}
+function articleCardHTML(a) {
+  const c = countryOf(a.author.country_code);
+  const gold = a.category === 'official';
+  return `<article class="acard" data-kind="a" data-id="${a.id}">
+    <span class="tw-cat${gold ? ' gold' : ''}">${gold ? '📜 ' : ''}${esc(a.category_label)}</span>
+    ${a.image ? `<img class="ac-img" src="${esc(a.image)}" loading="lazy" alt="">` : ''}
+    <h3>${esc(a.title)}</h3>
+    <p>${esc(excerpt(a.body, 160))}</p>
+    <div class="tw-head"><span class="av" style="width:30px;height:30px;font-size:1rem">${c.flag}</span>
+      <span class="tw-name" style="font-size:.85rem">${esc(c.name)}</span>
+      <span class="tw-handle">@${esc(a.author.username)} · ${timeAgo(a.created_at)}</span></div>
+  </article>`;
+}
+// تفويض النقرات داخل التايم لاين
+function bindFeed() {
+  app.querySelectorAll('[data-like]').forEach((b) => b.onclick = (e) => {
+    e.stopPropagation();
+    const on = likeStore.toggle(b.dataset.like);
+    b.classList.toggle('on', on);
+    b.querySelector('.a-ic').innerHTML = ICONS.heart(on);
+    const n = b.querySelector('span:last-child');
+    n.textContent = fmtN(parseInt(n.textContent.replace('K', '000')) + (on ? 1 : -1) || (on ? 1 : 0));
+  });
+  app.querySelectorAll('[data-del-d]').forEach((b) => b.onclick = async (e) => {
+    e.stopPropagation();
+    if (!confirm('حذف هذه البرقية؟')) return;
+    await api('DELETE', '/dispatches/' + b.dataset.delD); route();
+  });
+  app.querySelectorAll('[data-share-d]').forEach((b) => b.onclick = (e) => {
+    e.stopPropagation();
+    const url = location.origin + location.pathname + '#/dispatches';
+    (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject()).then(
+      () => alert('تم نسخ رابط البرقية ✓'), () => prompt('انسخ الرابط:', url));
+  });
+  app.querySelectorAll('[data-repost]').forEach((b) => b.onclick = (e) => {
+    e.stopPropagation();
+    if (!me) { location.hash = '#/login'; return; }
+    location.hash = '#/dash'; setTimeout(() => dashTab('new-d'), 350);
+  });
+  app.querySelectorAll('[data-go]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); location.hash = b.dataset.go; });
+  app.querySelectorAll('.tweet').forEach((t) => t.onclick = () => {
+    const img = t.querySelector('.tw-img');
+    if (img) window.open(img.src, '_blank');
+  });
+  app.querySelectorAll('.acard').forEach((c) => c.onclick = () => { location.hash = '#/article/' + c.dataset.id; });
+}
+const thead = (title, tabs) => `<div class="thead"><div class="thead-title">${title}</div>
+  ${tabs ? `<div class="ttabs">${tabs}</div>` : ''}</div>`;
+
+// ---------- المؤلف ----------
+function composerHTML() {
+  if (!me) return '';
+  const c = countryOf(me.country_code);
+  return `<div class="composer">
+    <span class="av">${c.flag}</span>
+    <div class="c-main">
+      <div id="msg"></div>
+      <textarea id="cbody" maxlength="500" placeholder="بماذا تودّ أن تُصرّح يا ${esc(c.name)}؟"></textarea>
+      <div class="c-prev" id="cprev" style="display:none"><img id="cprevimg"><button id="cpremx">✕</button></div>
+      <div class="c-tools">
+        <button class="c-ic" id="cimgbtn" title="إرفاق صورة">${ICONS.img}</button>
+        <input type="file" id="cimg" accept="image/*" style="display:none">
+        <span class="c-count" id="ccount">0 / 500</span>
+        <button class="c-post" id="cpost">نشر</button>
+      </div>
+    </div>
   </div>`;
+}
+function bindComposer(after) {
+  if (!me) return;
+  const ta = document.getElementById('cbody'), cnt = document.getElementById('ccount');
+  const fi = document.getElementById('cimg'), prev = document.getElementById('cprev'), pimg = document.getElementById('cprevimg');
+  let imgUrl = null;
+  ta.addEventListener('input', () => { cnt.textContent = `${ta.value.length} / 500`; });
+  document.getElementById('cimgbtn').onclick = () => fi.click();
+  fi.onchange = async () => {
+    const f = fi.files[0]; if (!f) return;
+    try { msg('جارٍ رفع الصورة…', true); imgUrl = await uploadImage(f);
+      pimg.src = imgUrl; prev.style.display = ''; msg('');
+    } catch (e) { msg(e.message, false); }
+  };
+  document.getElementById('cpremx').onclick = () => { prev.style.display = 'none'; imgUrl = null; fi.value = ''; };
+  document.getElementById('cpost').onclick = async () => {
+    const body = ta.value.trim();
+    if (!body) { msg('اكتب نص البرقية أولًا', false); return; }
+    try { await api('POST', '/dispatches', { body, image: imgUrl }); after && after(); }
+    catch (e) { msg(e.message, false); }
+  };
+}
+
+// ---------- الرئيسية ----------
+async function vHome() {
+  app.innerHTML = thead('الرئيسية',
+    `<button class="ttab active" data-ht="d">البرقيات</button><button class="ttab" data-ht="a">المقالات</button>`) +
+    composerHTML() + `<div id="feed"><div class="spin"></div></div>`;
+  bindComposer(() => route());
+  const tabs = app.querySelectorAll('[data-ht]');
+  const load = async (kind) => {
+    tabs.forEach((t) => t.classList.toggle('active', t.dataset.ht === kind));
+    const feed = document.getElementById('feed');
+    feed.innerHTML = '<div class="spin"></div>';
+    try {
+      if (kind === 'd') {
+        const items = await api('GET', '/dispatches?limit=30');
+        feed.innerHTML = items.length ? items.map(tweetHTML).join('')
+          : `<div class="empty"><span class="e-ic">📜</span>لا توجد برقيات بعد — كن أول من يصرّح باسم دولته.</div>`;
+      } else {
+        const items = await api('GET', '/articles?limit=20');
+        feed.innerHTML = items.length ? items.map(articleCardHTML).join('')
+          : '<div class="empty"><span class="e-ic">📰</span>لا توجد مقالات بعد.</div>';
+      }
+      bindFeed();
+    } catch (e) { feed.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  };
+  tabs.forEach((t) => t.onclick = () => load(t.dataset.ht));
+  await load('d');
+}
+
+// ---------- البرقيات ----------
+async function vDispatches() {
+  app.innerHTML = thead('برقيات الدول') + composerHTML() + `<div id="feed"><div class="spin"></div></div>`;
+  bindComposer(() => route());
+  try {
+    const items = await api('GET', '/dispatches?limit=40');
+    document.getElementById('feed').innerHTML = items.length ? items.map(tweetHTML).join('')
+      : '<div class="empty"><span class="e-ic">📜</span>لا توجد برقيات بعد.</div>';
+    bindFeed();
+  } catch (e) { document.getElementById('feed').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 
 // ---------- تصنيف ----------
 async function vCat(cat) {
-  app.innerHTML = '<p class="empty">جارٍ التحميل…</p>';
-  const items = await api('GET', `/articles?category=${cat}&limit=30`);
-  app.innerHTML = `<div class="sec-head"><h2>${CATS[cat] || ''}</h2></div>` +
-    (items.length ? `<div class="grid">${items.map(cardHTML).join('')}</div>` : '<p class="empty">لا توجد مواد في هذا القسم بعد.</p>');
+  app.innerHTML = thead(CATS[cat] || '') + `<div id="feed"><div class="spin"></div></div>`;
+  try {
+    const items = await api('GET', `/articles?category=${cat}&limit=30`);
+    document.getElementById('feed').innerHTML = items.length ? items.map(articleCardHTML).join('')
+      : '<div class="empty"><span class="e-ic">📰</span>لا توجد مواد في هذا القسم بعد.</div>';
+    bindFeed();
+  } catch (e) { document.getElementById('feed').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 
 // ---------- مقال ----------
 async function vArticle(id) {
-  app.innerHTML = '<p class="empty">جارٍ التحميل…</p>';
+  app.innerHTML = `<div class="backrow"><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
+    <div class="thead-title" style="padding:0">مقال</div></div><div class="spin"></div>`;
   try {
     const a = await api('GET', `/articles/${id}`);
     const c = countryOf(a.author.country_code);
     const canDel = me && (me.id === a.author.id || me.role === 'admin');
-    app.innerHTML = `<div class="article">
-      <span class="badge ${a.category === 'official' ? 'gold' : ''}">${esc(a.category_label)}</span>
-      <h1>${esc(a.title)}</h1>
-      <div class="byline"><span class="country-flag">${c.flag}</span><strong>${esc(c.name)}</strong>
-        <span>· @${esc(a.author.username)}</span><span>· ${timeAgo(a.created_at)}</span>
-        ${canDel ? `<button class="btn danger" style="margin-inline-start:auto;padding:6px 16px" onclick="delArticle(${a.id})">حذف</button>` : ''}</div>
-      ${a.image ? `<img class="lead-img" src="${esc(a.image)}" alt="">` : ''}
-      <div class="body">${esc(a.body)}</div>
-    </div>`;
-  } catch (e) { app.innerHTML = `<p class="empty">${esc(e.message)}</p>`; }
+    const gold = a.category === 'official';
+    app.innerHTML = `<div class="backrow"><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
+      <div class="thead-title" style="padding:0">مقال</div></div>
+      <div class="detail"><div class="d-pad">
+        <span class="tw-cat${gold ? ' gold' : ''}">${esc(a.category_label)}</span>
+        <h1>${esc(a.title)}</h1>
+        <div class="tw-head"><span class="av" style="width:38px;height:38px;font-size:1.3rem">${c.flag}</span>
+          <span class="tw-name">${esc(c.name)}</span>${a.author.country_code === 'HQ' ? ICONS.checkGold : ICONS.check}
+          <span class="tw-handle">@${esc(a.author.username)} · ${timeAgo(a.created_at)}</span>
+          ${canDel ? `<button class="btn danger" style="margin-inline-start:auto" onclick="delArticle(${a.id})">حذف المقال</button>` : ''}
+        </div></div>
+        ${a.image ? `<div class="d-pad"><img class="lead-img" src="${esc(a.image)}" alt=""></div>` : ''}
+        <div class="body">${esc(a.body)}</div>
+      </div>`;
+  } catch (e) { app.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 async function delArticle(id) {
   if (!confirm('حذف هذا المقال؟')) return;
   await api('DELETE', `/articles/${id}`); location.hash = '#/';
 }
 
-// ---------- البرقيات ----------
-async function vDispatches() {
-  app.innerHTML = '<p class="empty">جارٍ التحميل…</p>';
-  const items = await api('GET', '/dispatches?limit=40');
-  app.innerHTML = `<div class="sec-head"><h2>برقيات الدول</h2>
-    ${me ? '<a class="more" href="#/dash">+ برقية جديدة</a>' : '<a class="more" href="#/login">سجّل الدخول للتغريد باسم دولتك</a>'}</div>` +
-    (items.length ? items.map(dispatchHTML).join('') : '<p class="empty">لا توجد برقيات بعد — كن أول من يصرّح باسم دولته.</p>');
-}
-
-// ---------- الدخول / التسجيل ----------
-function vLogin() {
-  app.innerHTML = `<div class="form"><h2>تسجيل الدخول</h2><div id="msg"></div>
-    <div class="field"><label>البريد الإلكتروني</label><input id="email" type="email" dir="ltr"></div>
-    <div class="field"><label>كلمة المرور</label><input id="password" type="password"></div>
-    <button class="btn" onclick="doLogin()">دخول</button>
-    <p class="hint">ليس لديك حساب؟ <a href="#/register">أنشئ حسابًا واختر دولتك</a></p></div>`;
-}
-async function doLogin() {
-  try {
-    await api('POST', '/login', { email: val('email'), password: val('password') });
-    me = (await api('GET', '/me')).user; renderTop(); location.hash = '#/';
-  } catch (e) { msg(e.message, false); }
-}
-async function vRegister() {
-  let taken = [];
-  try { taken = await api('GET', '/taken-countries'); } catch (e) {}
-  app.innerHTML = `<div class="form"><h2>إنشاء حساب لاعب</h2><div id="msg"></div>
-    <div class="field"><label>اسم المستخدم</label><input id="username" dir="ltr" placeholder="مثال: napoleon_1900">
-      <div class="hint">أحرف إنجليزية وأرقام و _ فقط (3-20)</div></div>
-    <div class="field"><label>البريد الإلكتروني</label><input id="email" type="email" dir="ltr"></div>
-    <div class="field"><label>كلمة المرور</label><input id="password" type="password"><div class="hint">6 أحرف على الأقل</div></div>
-    <div class="field"><label>الدولة التي ستلعب بها</label><select id="country">
-      ${COUNTRIES.map((c) => `<option value="${c.code}"${taken.includes(c.code) ? ' disabled' : ''}>${c.flag} ${c.name}${taken.includes(c.code) ? ' — محجوزة' : ''}</option>`).join('')}</select>
-      <div class="hint">كل دولة يحجزها لاعب واحد فقط — الدول المحجوزة تظهر معطّلة</div></div>
-    <button class="btn" onclick="doRegister()">إنشاء الحساب</button></div>`;
-}
-async function doRegister() {
-  try {
-    const r = await api('POST', '/register', {
-      username: val('username'), email: val('email'), password: val('password'), country_code: val('country'),
-    });
-    me = (await api('GET', '/me')).user; renderTop(); location.hash = '#/dash';
-    if (r.role === 'admin') alert('أنت أول المسجّلين — مُنحت صلاحيات إدارة المقر (البيانات الرسمية).');
-  } catch (e) { msg(e.message, false); }
-}
-const val = (id) => document.getElementById(id).value.trim();
-function msg(t, ok) { document.getElementById('msg').innerHTML = `<div class="${ok ? 'okmsg' : 'err'}">${esc(t)}</div>`; }
-
-// ---------- لوحة التحكم ----------
-async function vDash() {
-  if (!me) { location.hash = '#/login'; return; }
-  const c = countryOf(me.country_code);
-  app.innerHTML = `<div class="sec-head"><h2>لوحة التحكم — ${c.flag} ${esc(c.name)}</h2></div>
-    <div class="tabs">
-      <button onclick="dashTab('new-d')" class="active">برقية جديدة</button>
-      <button onclick="dashTab('new-a')">مقال جديد</button>
-      <button onclick="dashTab('dossier')">ملفي الاستخباراتي</button>
-      <button onclick="dashTab('mine')">منشوراتي</button>
-    </div><div id="dashbody"></div>`;
-  dashTab('new-d');
-}
-async function dashTab(t) {
-  document.querySelectorAll('.tabs button').forEach((b) => b.classList.remove('active'));
-  const btns = document.querySelectorAll('.tabs button');
-  const body = document.getElementById('dashbody');
-  if (t === 'new-d') {
-    btns[0].classList.add('active');
-    const c = countryOf(me.country_code);
-    body.innerHTML = `<div class="form"><h2>برقية جديدة باسم ${c.flag} ${esc(c.name)}</h2><div id="msg"></div>
-      <div class="field"><label>نص البرقية (500 حرف كحد أقصى)</label>
-      <textarea id="dbody" maxlength="500" placeholder="مثال: تعلن ${esc(c.name)} عن تعبئة عامة على الحدود…"></textarea></div>
-      <div class="field"><label>صورة مرفقة (اختياري)</label><input id="dimg" type="file" accept="image/*"></div>
-      <button class="btn" onclick="sendDispatch()">نشر البرقية</button></div>`;
-  } else if (t === 'new-a') {
-    btns[1].classList.add('active');
-    const cats = Object.entries(CATS).filter(([k]) => k !== 'official' || me.role === 'admin');
-    body.innerHTML = `<div class="form"><h2>مقال جديد</h2><div id="msg"></div>
-      <div class="field"><label>القسم</label><select id="acat">
-        ${cats.map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
-      <div class="field"><label>العنوان</label><input id="atitle"></div>
-      <div class="field"><label>نص المقال</label><textarea id="abody" style="min-height:220px" placeholder="اكتب سيناريو المعركة أو الحدث بالتفصيل…"></textarea></div>
-      <div class="field"><label>صورة المقال (اختياري)</label><input id="aimg" type="file" accept="image/*"></div>
-      <button class="btn" onclick="sendArticle()">نشر المقال</button></div>`;
-  } else if (t === 'dossier') {
-    btns[2].classList.add('active');
-    body.innerHTML = '<p class="empty">جارٍ تحميل الملف…</p>';
-    await vDashDossier(body);
-  } else {
-    btns[3].classList.add('active');
-    body.innerHTML = '<p class="empty">جارٍ التحميل…</p>';
-    const [arts, disps] = await Promise.all([
-      api('GET', '/articles?limit=100'), api('GET', '/dispatches?limit=100'),
-    ]);
-    const mine_a = arts.filter((a) => a.author.username === me.username);
-    const mine_d = disps.filter((d) => d.author.username === me.username);
-    body.innerHTML =
-      `<h3>مقالاتي (${mine_a.length})</h3>` +
-      (mine_a.map((a) => rowItem(`📰 ${esc(a.title)}`, `delArticle(${a.id})`)).join('') || '<p class="hint">لا توجد مقالات.</p>') +
-      `<h3>برقياتي (${mine_d.length})</h3>` +
-      (mine_d.map((d) => rowItem(`📜 ${esc(excerpt(d.body, 60))}`, `delDispatch(${d.id})`)).join('') || '<p class="hint">لا توجد برقيات.</p>');
-  }
-}
-const rowItem = (t, fn) => `<div class="row-item"><span class="grow">${t}</span><button class="btn danger" style="padding:5px 14px" onclick="${fn}">حذف</button></div>`;
-async function sendDispatch() {
-  try {
-    let image = null;
-    const f = document.getElementById('dimg').files[0];
-    if (f) { msg('جارٍ رفع الصورة…', true); image = await uploadImage(f); }
-    await api('POST', '/dispatches', { body: val('dbody'), image });
-    location.hash = '#/dispatches';
-  } catch (e) { msg(e.message, false); }
-}
-async function sendArticle() {
-  try {
-    let image = null;
-    const f = document.getElementById('aimg').files[0];
-    if (f) { msg('جارٍ رفع الصورة…', true); image = await uploadImage(f); }
-    const r = await api('POST', '/articles', { title: val('atitle'), body: val('abody'), category: val('acat'), image });
-    location.hash = '#/article/' + r.id;
-  } catch (e) { msg(e.message, false); }
-}
-async function delDispatch(id) {
-  if (!confirm('حذف هذه البرقية؟')) return;
-  await api('DELETE', `/dispatches/${id}`); dashTab('mine');
-}
-
-// ---------- التوجيه ----------
-async function route() {
-  const h = location.hash || '#/';
-  renderTopActive(h);
-  try {
-    if (h === '#/' || h === '') await vHome();
-    else if (h.startsWith('#/cat/')) await vCat(h.split('/')[2]);
-    else if (h.startsWith('#/article/')) await vArticle(h.split('/')[2]);
-    else if (h === '#/dispatches') await vDispatches();
-    else if (h === '#/dossiers') await vDossiers();
-    else if (h.startsWith('#/dossier/')) await vDossier(decodeURIComponent(h.split('/')[2] || ''));
-    else if (h === '#/login') vLogin();
-    else if (h === '#/register') await vRegister();
-    else if (h === '#/dash') await vDash();
-    else await vHome();
-  } catch (e) { app.innerHTML = `<p class="empty">${esc(e.message)}</p>`; }
-  window.scrollTo(0, 0);
-}
-function renderTopActive(h) {
-  document.querySelectorAll('.mainnav a').forEach((a) =>
-    a.classList.toggle('active', a.getAttribute('href') === h.split('?')[0]));
-}
-
-// ---------- ملفات العملاء (الإنجازات) ----------
+// ---------- ملفات العملاء ----------
 const dots = (n) => '●'.repeat(n) + `<span class="dots-off">${'●'.repeat(5 - n)}</span>`;
-function dossierCardHTML(d) {
-  const c = countryOf(d.country_code);
-  return `<div class="card" onclick="location.hash='#/dossier/${esc(d.username)}'">
-    <div class="dos-card-head">
-      ${d.avatar ? `<img class="dos-card-av" src="${esc(d.avatar)}" alt="">` : `<div class="dos-card-flag">${c.flag}</div>`}
-      <div class="grow">
-        <div class="dos-card-name">${esc(d.username)}</div>
-        <div class="hint">${d.alias ? `«${esc(d.alias)}» · ` : ''}${c.flag} ${esc(c.name)}</div>
-      </div>
-      <span class="status-badge ${esc(d.status)}">${STATUS_AR[d.status] || d.status}</span>
-    </div>
-    <div class="card-tx">
-      <div class="hint">CLEARANCE: <b dir="ltr">${esc(d.clearance)}</b></div>
-      <span class="more-link">فتح الملف الاستخباراتي ←</span>
-    </div>
-  </div>`;
-}
 async function vDossiers() {
-  const list = await api('GET', '/dossiers');
-  let h = `<div class="sec-head"><h2>ملفات العملاء</h2></div>
-    <p class="hint" style="margin-top:-10px">سجلات استخباراتية مصنّفة للاعبي المحاكاة: العمليات، المناصب، الإنجازات، ومصفوفة المهارات.</p>`;
-  h += list.length ? `<div class="grid">${list.map(dossierCardHTML).join('')}</div>`
-    : '<p class="empty">لا توجد ملفات بعد — سيظهر ملف كل لاعب هنا فور تسجيله.</p>';
-  app.innerHTML = h;
+  app.innerHTML = thead('ملفات العملاء') + `<div class="dos-list"><div class="spin"></div></div>`;
+  try {
+    const list = await api('GET', '/dossiers');
+    document.querySelector('.dos-list').innerHTML = list.length ? list.map((d) => {
+      const c = countryOf(d.country_code);
+      return `<div class="dos-card" onclick="location.hash='#/dossier/${esc(d.username)}'">
+        <span class="av">${d.avatar ? `<img src="${esc(d.avatar)}">` : c.flag}</span>
+        <span class="dc-tx"><span class="dc-n">${esc(d.username)}</span>
+          <span class="status-badge ${esc(d.status)}" style="margin-inline-start:8px">${STATUS_AR[d.status] || d.status}</span><br>
+          <span class="dc-s">${d.alias ? `«${esc(d.alias)}» · ` : ''}${c.flag} ${esc(c.name)} · <span dir="ltr">${esc(d.clearance)}</span></span></span>
+        <span class="hint">←</span></div>`;
+    }).join('') : '<div class="empty"><span class="e-ic">🗂️</span>لا توجد ملفات بعد — سيظهر ملف كل لاعب هنا فور تسجيله.</div>';
+  } catch (e) { document.querySelector('.dos-list').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 async function vDossier(username) {
+  app.innerHTML = `<div class="backrow"><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
+    <div class="thead-title" style="padding:0">الملف الاستخباراتي</div></div><div class="spin"></div>`;
   let r;
   try { r = await api('GET', '/dossier/' + encodeURIComponent(username)); }
-  catch (e) { app.innerHTML = '<p class="empty">الملف غير موجود.</p>'; return; }
+  catch (e) { app.innerHTML = '<div class="empty">الملف غير موجود.</div>'; return; }
   const { user, dossier: d } = r;
   const c = countryOf(user.country_code);
   const isMine = me && me.username === user.username;
@@ -356,12 +379,14 @@ async function vDossier(username) {
     return `<div class="dos-skill"><span>${label}</span><span class="dos-dots" dir="ltr">${dots(v)}</span></div>`;
   }).join('');
   app.innerHTML = `
+  <div class="backrow"><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
+    <div class="thead-title" style="padding:0">الملف الاستخباراتي</div></div>
   <div class="dossier">
-    <div class="dos-top"><span>ARGOS // STRATEGIC DOSSIER</span><span class="dos-class">CLASSIFIED // EYES ONLY</span></div>
+    <div class="dos-top"><span>ARGOS // STRATEGIC DOSSIER</span><span>CLASSIFIED // EYES ONLY</span></div>
     <div class="dos-file" dir="ltr">FILE: ${esc(user.username.toUpperCase())}.CV</div>
     <div class="dos-id">
       <div class="dos-photo">
-        ${d.avatar ? `<img src="${esc(d.avatar)}" alt="">` : `<div class="dos-photo-flag">${c.flag}</div>`}
+        ${d.avatar ? `<img src="${esc(d.avatar)}">` : `<div class="dos-photo-flag">${c.flag}</div>`}
         <i class="cnr tl"></i><i class="cnr tr"></i><i class="cnr bl"></i><i class="cnr br"></i>
       </div>
       <div class="dos-idinfo">
@@ -395,20 +420,155 @@ async function vDossier(username) {
     </div>
   </div>`;
 }
+
+// ---------- الدخول / التسجيل ----------
+function vLogin() {
+  app.innerHTML = `<div class="auth">
+    <div class="a-logo"><img src="/logo.jpg" alt="أرجوس"></div>
+    <h2>تسجيل الدخول إلى أرجوس</h2><p class="a-sub">تابع برقيات الدول لحظة بلحظة</p><div id="msg"></div>
+    <div class="field"><input id="email" type="email" dir="ltr" placeholder="البريد الإلكتروني"></div>
+    <div class="field"><input id="password" type="password" placeholder="كلمة المرور"></div>
+    <button class="btn" onclick="doLogin()">دخول</button>
+    <p class="swap">ليس لديك حساب؟ <a href="#/register">أنشئ حسابًا واختر دولتك</a></p></div>`;
+}
+async function doLogin() {
+  try {
+    await api('POST', '/login', { email: val('email'), password: val('password') });
+    me = (await api('GET', '/me')).user; boot(false); location.hash = '#/';
+  } catch (e) { msg(e.message, false); }
+}
+async function vRegister() {
+  let taken = [];
+  try { taken = await api('GET', '/taken-countries'); } catch (e) {}
+  app.innerHTML = `<div class="auth">
+    <div class="a-logo"><img src="/logo.jpg" alt="أرجوس"></div>
+    <h2>انضم إلى أرجوس</h2><p class="a-sub">أنشئ حساب لاعب واحجز دولتك — كل دولة للاعب واحد فقط</p><div id="msg"></div>
+    <div class="field"><input id="username" dir="ltr" placeholder="اسم المستخدم (إنجليزي، 3-20)"></div>
+    <div class="field"><input id="email" type="email" dir="ltr" placeholder="البريد الإلكتروني"></div>
+    <div class="field"><input id="password" type="password" placeholder="كلمة المرور (6 أحرف على الأقل)"></div>
+    <div class="field"><label>الدولة التي ستلعب بها</label><select id="country">
+      ${COUNTRIES.map((c) => `<option value="${c.code}"${taken.includes(c.code) ? ' disabled' : ''}>${c.flag} ${c.name}${taken.includes(c.code) ? ' — محجوزة' : ''}</option>`).join('')}</select></div>
+    <button class="btn" onclick="doRegister()">إنشاء الحساب</button>
+    <p class="swap">لديك حساب؟ <a href="#/login">سجّل الدخول</a></p></div>`;
+}
+async function doRegister() {
+  try {
+    const r = await api('POST', '/register', {
+      username: val('username'), email: val('email'), password: val('password'), country_code: val('country'),
+    });
+    me = (await api('GET', '/me')).user; boot(false); location.hash = '#/dash';
+    if (r.role === 'admin') setTimeout(() => alert('أنت أول المسجّلين — مُنحت صلاحيات إدارة المقر (البيانات الرسمية).'), 400);
+  } catch (e) { msg(e.message, false); }
+}
+
+// ---------- لوحة التحكم (بروفايل) ----------
+async function vDash() {
+  if (!me) { location.hash = '#/login'; return; }
+  const c = countryOf(me.country_code);
+  const [arts, disps] = await Promise.all([
+    api('GET', '/articles?limit=100').catch(() => []), api('GET', '/dispatches?limit=100').catch(() => []),
+  ]);
+  const mine_a = arts.filter((a) => a.author.username === me.username).length;
+  const mine_d = disps.filter((d) => d.author.username === me.username).length;
+  app.innerHTML = `
+    <div class="backrow"><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
+      <div><div class="thead-title" style="padding:0">${esc(me.username)}</div>
+      <div class="hint">${mine_d} برقية · ${mine_a} مقال</div></div></div>
+    <div class="cover"></div>
+    <div class="prow">
+      <div class="p-av">${c.flag}</div>
+      <div class="p-head"><div class="p-id">
+        <div class="p-name">${esc(c.name)} ${me.role === 'admin' ? ICONS.checkGold : ICONS.check}</div>
+        <div class="p-handle">@${esc(me.username)}</div></div>
+      </div>
+      <p class="p-bio">${c.flag} الحساب الرسمي لدولة ${esc(c.name)} في محاكاة أرجوس للتاريخ — 1900.</p>
+      <div class="p-meta"><span>📍 ${esc(c.name)}</span><span>🗓️ انضم ${timeAgo(me.created_at || Date.now())}</span>
+        ${me.role === 'admin' ? '<span>⭐ إدارة المقر</span>' : ''}</div>
+      <div class="p-meta"><span><b>${mine_d}</b> برقية</span><span><b>${mine_a}</b> مقال</span></div>
+    </div>
+    <div class="ptabs">
+      <button class="ptab active" data-pt="feed">منشوراتي</button>
+      <button class="ptab" data-pt="new-d">برقية جديدة</button>
+      <button class="ptab" data-pt="new-a">مقال جديد</button>
+      <button class="ptab" data-pt="dossier">ملفي الاستخباراتي</button>
+    </div>
+    <div id="pbody"></div>`;
+  const tabs = app.querySelectorAll('[data-pt]');
+  tabs.forEach((t) => t.onclick = () => {
+    tabs.forEach((x) => x.classList.remove('active')); t.classList.add('active'); dashTab(t.dataset.pt);
+  });
+  dashTab('feed');
+}
+async function dashTab(t) {
+  const body = document.getElementById('pbody');
+  if (!body) return;
+  if (t === 'feed') {
+    body.innerHTML = '<div class="spin"></div>';
+    const [arts, disps] = await Promise.all([
+      api('GET', '/articles?limit=100'), api('GET', '/dispatches?limit=100'),
+    ]);
+    const mine_a = arts.filter((a) => a.author.username === me.username);
+    const mine_d = disps.filter((d) => d.author.username === me.username);
+    body.innerHTML = `<div class="sec-h">مقالاتي (${mine_a.length})</div>` +
+      (mine_a.map((a) => rowItem(`📰 ${esc(a.title)} · ${timeAgo(a.created_at)}`, `delArticle(${a.id})`)).join('') || '<p class="hint" style="padding:0 18px">لا توجد مقالات.</p>') +
+      `<div class="sec-h">برقياتي (${mine_d.length})</div>` +
+      (mine_d.map((d) => rowItem(`📜 ${esc(excerpt(d.body, 70))}`, `delDispatch(${d.id})`)).join('') || '<p class="hint" style="padding:0 18px">لا توجد برقيات.</p>');
+  } else if (t === 'new-d') {
+    const c = countryOf(me.country_code);
+    body.innerHTML = `<div class="form-dark"><h2>برقية جديدة باسم ${c.flag} ${esc(c.name)}</h2><div id="msg"></div>
+      <div class="field"><textarea id="dbody" maxlength="500" placeholder="بماذا تودّ أن تُصرّح؟ (500 حرف كحد أقصى)"></textarea></div>
+      <div class="field"><label class="filebtn">${ICONS.img} إرفاق صورة (اختياري)<input id="dimg" type="file" accept="image/*" style="display:none"></label></div>
+      <button class="btn" style="width:auto;padding:12px 44px" onclick="sendDispatch()">نشر البرقية</button></div>`;
+  } else if (t === 'new-a') {
+    const cats = Object.entries(CATS).filter(([k]) => k !== 'official' || me.role === 'admin');
+    body.innerHTML = `<div class="form-dark"><h2>مقال جديد</h2><div id="msg"></div>
+      <div class="field"><label>القسم</label><select id="acat">${cats.map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
+      <div class="field"><label>العنوان</label><input id="atitle"></div>
+      <div class="field"><label>نص المقال</label><textarea id="abody" style="min-height:220px" placeholder="اكتب سيناريو المعركة أو الحدث بالتفصيل…"></textarea></div>
+      <div class="field"><label class="filebtn">${ICONS.img} صورة المقال (اختياري)<input id="aimg" type="file" accept="image/*" style="display:none"></label></div>
+      <button class="btn" style="width:auto;padding:12px 44px" onclick="sendArticle()">نشر المقال</button></div>`;
+  } else {
+    body.innerHTML = '<div class="spin"></div>';
+    await vDashDossier(body);
+  }
+}
+const rowItem = (t, fn) => `<div class="row-item"><span class="grow">${t}</span><button class="btn danger" onclick="${fn}">حذف</button></div>`;
+async function sendDispatch() {
+  try {
+    let image = null;
+    const f = document.getElementById('dimg').files[0];
+    if (f) { msg('جارٍ رفع الصورة…', true); image = await uploadImage(f); }
+    await api('POST', '/dispatches', { body: val('dbody'), image });
+    dashTab('feed');
+  } catch (e) { msg(e.message, false); }
+}
+async function sendArticle() {
+  try {
+    let image = null;
+    const f = document.getElementById('aimg').files[0];
+    if (f) { msg('جارٍ رفع الصورة…', true); image = await uploadImage(f); }
+    const r = await api('POST', '/articles', { title: val('atitle'), body: val('abody'), category: val('acat'), image });
+    location.hash = '#/article/' + r.id;
+  } catch (e) { msg(e.message, false); }
+}
+async function delDispatch(id) {
+  if (!confirm('حذف هذه البرقية؟')) return;
+  await api('DELETE', `/dispatches/${id}`); dashTab('feed');
+}
 async function vDashDossier(body) {
   let r;
   try { r = await api('GET', '/dossier/' + encodeURIComponent(me.username)); }
-  catch (e) { body.innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  catch (e) { body.innerHTML = `<div class="form-dark"><p class="err">${esc(e.message)}</p></div>`; return; }
   const d = r.dossier;
   const th = new Set(d.theaters || []);
-  body.innerHTML = `<div class="form" style="max-width:760px"><h2>ملفي الاستخباراتي</h2><div id="msg"></div>
+  body.innerHTML = `<div class="form-dark"><h2>ملفي الاستخباراتي</h2><div id="msg"></div>
     <div class="field"><label>الصورة الشخصية للملف</label>
       <div style="display:flex;gap:12px;align-items:center">
-        <img id="favatarprev" src="${esc(d.avatar || '')}" style="width:72px;height:72px;border-radius:50%;object-fit:cover;${d.avatar ? '' : 'display:none'}">
-        <input id="favatar" type="file" accept="image/*">
+        <img id="favatarprev" class="avprev" src="${esc(d.avatar || '')}" style="${d.avatar ? '' : 'display:none'}">
+        <label class="filebtn">${ICONS.img} اختر صورة<input id="favatar" type="file" accept="image/*" style="display:none"></label>
       </div><input id="favatarurl" type="hidden" value="${esc(d.avatar || '')}"></div>
     <div class="field"><label>الاسم المستعار (Alias)</label><input id="falias" value="${esc(d.alias)}" placeholder="مثال: الثعلب" dir="ltr"></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+    <div class="frow">
       <div class="field"><label>الحالة (Status)</label><select id="fstatus">
         ${Object.entries(STATUS_AR).map(([k, v]) => `<option value="${k}"${d.status === k ? ' selected' : ''}>${v} (${k})</option>`).join('')}</select></div>
       <div class="field"><label>مستوى التصريح (Clearance)</label><select id="fclearance">
@@ -419,15 +579,15 @@ async function vDashDossier(body) {
     <div class="field"><label>مسارح العمليات (Theaters)</label>
       <div class="check-grid">${COUNTRIES.map((x) => `<label><input type="checkbox" class="fth" value="${x.code}"${th.has(x.code) ? ' checked' : ''}> ${x.flag} ${esc(x.name)}</label>`).join('')}</div></div>
     <div class="field"><label>المناصب والخدمات (سطر لكل منصب)</label>
-      <textarea id="froles" placeholder="مثال: رئيس وزراء بريطانيا&#10;عميل في جهاز الأمن الفيدرالي">${esc((d.roles || []).join('\n'))}</textarea></div>
+      <textarea id="froles" placeholder="مثال: رئيس وزراء بريطانيا">${esc((d.roles || []).join('\n'))}</textarea></div>
     <div class="field"><label>🏆 الإنجازات (سطر لكل إنجاز)</label>
-      <textarea id="fach" placeholder="مثال: قاد حملة البلقان بنجاح سنة 1901&#10;أبرم تحالفًا مع ثلاث دول">${esc((d.achievements || []).join('\n'))}</textarea></div>
+      <textarea id="fach" placeholder="مثال: قاد حملة البلقان بنجاح سنة 1901">${esc((d.achievements || []).join('\n'))}</textarea></div>
     <div class="field"><label>مصفوفة المهارات (Skill Matrix)</label>
       <div class="dos-skills-edit">${Object.entries(SKILLS).map(([k, label]) => `
         <div class="dos-skill"><span>${label}</span>
           <select id="fsk_${k}" dir="ltr">${[0, 1, 2, 3, 4, 5].map((n) => `<option value="${n}"${Number(d.skills[k]) === n ? ' selected' : ''}>${'●'.repeat(n) || '○'}</option>`).join('')}</select>
         </div>`).join('')}</div></div>
-    <button class="btn" onclick="saveDossier()">حفظ الملف</button>
+    <button class="btn" style="width:auto;padding:12px 44px" onclick="saveDossier()">حفظ الملف</button>
     <button class="btn ghost" onclick="location.hash='#/dossier/${esc(me.username)}'" style="margin-inline-start:8px">معاينة الملف</button>
   </div>`;
   document.getElementById('favatar').onchange = async (e) => {
@@ -453,12 +613,45 @@ async function saveDossier() {
   } catch (e) { msg(e.message, false); }
 }
 
+// ---------- التوجيه ----------
+function navKey(h) {
+  if (h === '#/' || h === '') return '#/';
+  if (h.startsWith('#/cat/')) return '#/cat/' + h.split('/')[2];
+  if (h === '#/dispatches' || h === '#/dossiers' || h === '#/dash' || h === '#/login') return h;
+  return null;
+}
+async function route() {
+  const h = location.hash || '#/';
+  renderNav(navKey(h));
+  try {
+    if (h === '#/' || h === '') await vHome();
+    else if (h.startsWith('#/cat/')) await vCat(h.split('/')[2]);
+    else if (h.startsWith('#/article/')) await vArticle(h.split('/')[2]);
+    else if (h === '#/dispatches') await vDispatches();
+    else if (h === '#/dossiers') await vDossiers();
+    else if (h.startsWith('#/dossier/')) await vDossier(decodeURIComponent(h.split('/')[2] || ''));
+    else if (h === '#/login') vLogin();
+    else if (h === '#/register') await vRegister();
+    else if (h === '#/dash') await vDash();
+    else await vHome();
+  } catch (e) { app.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  window.scrollTo(0, 0);
+}
+
 // ---------- بدء ----------
-(async function boot() {
-  COUNTRIES = await api('GET', '/countries');
-  CMAP = Object.fromEntries(COUNTRIES.map((c) => [c.code, c]));
-  me = (await api('GET', '/me')).user;
-  renderTop();
-  window.addEventListener('hashchange', route);
-  await route();
-})();
+async function boot(first = true) {
+  try {
+    COUNTRIES = await api('GET', '/countries');
+    CMAP = Object.fromEntries(COUNTRIES.map((c) => [c.code, c]));
+    me = (await api('GET', '/me')).user;
+    renderNav(navKey(location.hash || '#/'));
+    renderWidgets();
+    if (first) {
+      window.addEventListener('hashchange', route);
+      await route();
+    } else { await route(); }
+  } catch (e) {
+    app.innerHTML = `<div class="empty"><span class="e-ic">⚠️</span>تعذّر الاتصال بالخادم.<br>${esc(e.message)}</div>`;
+  }
+}
+boot();

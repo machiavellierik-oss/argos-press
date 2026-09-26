@@ -3,45 +3,35 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>جريدة أرجوس | الصحيفة الرسمية للمحاكاة</title>
-<link rel="icon" type="image/png" href="/logo.jpg">
+<title>أرجوس | منصة برقيات الدول</title>
+<link rel="icon" type="image/jpeg" href="/logo.jpg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Amiri:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <div class="topbar">
-    <div class="wrap topbar-in">
-      <span id="today"></span>
-      <span class="topbar-tag">الموقع الرسمي لـ Argos | محاكاة التاريخ 1900</span>
-      <span id="userbox"></span>
-    </div>
-  </div>
-
-  <header class="masthead">
-    <div class="wrap masthead-in">
-      <img class="logo" src="/logo.jpg" alt="شعار أرجوس">
-      <div class="masthead-tx">
-        <h1 class="paper-title">جريدة أرجوس</h1>
-        <p class="paper-sub">الصحيفة الرسمية لمحاكاة التاريخ — سيناريوهات الحروب وأحداث اللعبة لحظة بلحظة</p>
-      </div>
+<div class="layout">
+  <header class="sidenav">
+    <div class="nav-inner">
+      <a class="brand" href="#/" title="أرجوس"><img src="/logo.jpg" alt="أرجوس"></a>
+      <nav id="mainnav" aria-label="التنقل الرئيسي"></nav>
+      <button class="compose-btn" id="composeBtn"><span class="cb-ic"></span><span class="cb-tx">برقية جديدة</span></button>
+      <div class="nav-user" id="navuser"></div>
     </div>
   </header>
 
-  <nav class="mainnav">
-    <div class="wrap" id="mainnav"></div>
-  </nav>
+  <main class="timeline" id="app"></main>
 
-  <main class="wrap" id="app"></main>
+  <aside class="widgets">
+    <div class="w-search" id="wsearch"></div>
+    <div class="w-card" id="wtrends"></div>
+    <div class="w-card" id="wusers"></div>
+    <div class="w-foot">جريدة أرجوس © 1900–2026<br>الصحيفة الرسمية لمحاكاة التاريخ</div>
+  </aside>
+</div>
 
-  <footer class="footer">
-    <div class="wrap">
-      <img class="logo-sm" src="/logo.jpg" alt="أرجوس">
-      <p><strong>جريدة أرجوس</strong> — تصدر عن مقر أرجوس لتوثيق أحداث المحاكاة منذ 1 يناير 1900.</p>
-      <p class="dim">الواقعية الصارمة هي القاعدة الذهبية: كل قرار يُقيَّم بمنطق حقيقي.</p>
-    </div>
-  </footer>
+<nav class="bottomnav" id="bottomnav" aria-label="تنقل سفلي"></nav>
 
 <script src="/app.js"></script>
 </body>
