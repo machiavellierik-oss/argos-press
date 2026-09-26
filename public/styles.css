@@ -391,3 +391,35 @@ button{font-family:inherit;cursor:pointer}
 .cform{display:flex;gap:10px;align-items:center;padding:14px 18px}
 .cform input{flex:1;background:var(--card);border:1px solid var(--line);border-radius:999px;color:var(--ink);padding:10px 16px;font-size:.95rem;font-family:inherit;outline:none;min-width:0}
 .cform input:focus{border-color:var(--accent)}
+
+/* ===== الصورة الشخصية في الدوائر ===== */
+.ring-img{width:100%;height:100%;border-radius:50%;object-fit:cover}
+.p-av img{width:100%;height:100%;border-radius:50%;object-fit:cover}
+.pav-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.m-input{width:100%;box-sizing:border-box;background:#000;border:1px solid var(--line);border-radius:12px;color:var(--ink);padding:10px 14px;margin-bottom:10px;outline:none;font-family:inherit}
+.m-input:focus{border-color:var(--accent)}
+
+/* ===== الرسائل الخاصة (ماسنجر) ===== */
+.unread{background:var(--accent);color:#fff;font-size:.72rem;font-weight:700;min-width:20px;height:20px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;padding:0 6px;margin-inline-start:6px}
+.conv{display:flex;gap:12px;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line);text-decoration:none;color:var(--ink);width:100%;box-sizing:border-box}
+.conv:hover{background:rgba(255,255,255,.02)}
+.conv-tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.conv-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.conv-name{font-weight:700}
+.conv-last{color:var(--muted);font-size:.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.th-head{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:5}
+.th-u{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink)}
+.th-un{display:flex;flex-direction:column;gap:1px}
+.thread{padding:16px;display:flex;flex-direction:column;gap:8px;min-height:46vh;max-height:calc(100vh - 320px);overflow-y:auto}
+.msg{display:flex;flex-direction:column;max-width:78%;gap:2px}
+.msg.mine{align-self:flex-end;align-items:flex-end}
+.msg.theirs{align-self:flex-start;align-items:flex-start}
+.bubble{padding:10px 14px;border-radius:18px;line-height:1.7;white-space:pre-wrap;word-break:break-word}
+.msg.mine .bubble{background:var(--accent);color:#fff;border-end-end-radius:6px}
+.msg.theirs .bubble{background:var(--card);border:1px solid var(--line);border-end-start-radius:6px}
+.msg-img{max-width:240px;border-radius:14px;cursor:pointer}
+.msg-t{font-size:.68rem;color:var(--muted)}
+.tform{position:sticky;bottom:0;background:var(--bg);z-index:5;border-top:1px solid var(--line)}
+.viewer-card{position:relative;max-width:92vw;max-height:88vh}
+.viewer-card img{max-width:92vw;max-height:88vh;border-radius:var(--r);object-fit:contain}
+.viewer-card .m-x{position:absolute;top:8px;inset-inline-end:8px}

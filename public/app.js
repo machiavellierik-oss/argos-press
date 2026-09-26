@@ -33,6 +33,7 @@ const ICONS = {
   trash: I('<path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/>'),
   img: I('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 18l5-5 3 3 4-4 4 4"/>'),
   back: I('<path d="M19 12H5M11 6l-6 6 6 6"/>'),
+  mail: I('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>'),
   dots: I('<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>'),
   check: `<svg class="vbadge" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 2.4 3.4-.5.9 3.3 3 1.7-1.4 3.1 1.4 3.1-3 1.7-.9 3.3-3.4-.5L12 22l-2.4-2.4-3.4.5-.9-3.3-3-1.7L3.7 12 2.3 8.9l3-1.7.9-3.3 3.4.5L12 2z"/><path d="M10.6 14.6l-2.1-2.1-1.4 1.4 3.5 3.5 7-7-1.4-1.4z" fill="#000"/></svg>`,
   checkGold: `<svg class="vbadge gold" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 2.4 3.4-.5.9 3.3 3 1.7-1.4 3.1 1.4 3.1-3 1.7-.9 3.3-3.4-.5L12 22l-2.4-2.4-3.4.5-.9-3.3-3-1.7L3.7 12 2.3 8.9l3-1.7.9-3.3 3.4.5L12 2z"/><path d="M10.6 14.6l-2.1-2.1-1.4 1.4 3.5 3.5 7-7-1.4-1.4z" fill="#000"/></svg>`,
@@ -77,6 +78,13 @@ function msg(t, ok) {
 // عدّاد المشاهدات التقريبي (تجميلي فقط)
 const baseCount = (id, salt) => { let x = (id * 2654435761 + salt * 40503) % 997; return x < 0 ? -x : x; };
 const fmtN = (n) => n >= 1000 ? (n / 1000).toFixed(1).replace('.0', '') + 'K' : String(n);
+// الأفاتار: الصورة الشخصية إن وُجدت وإلا علم الدولة
+function avHTML(author, sz) {
+  const st = sz ? ` style="width:${sz}px;height:${sz}px;font-size:${Math.round(sz * 0.42)}px"` : '';
+  if (author && author.avatar) return `<span class="av"${st}><img src="${esc(author.avatar)}" alt=""></span>`;
+  const c = countryOf(author ? author.country_code : null);
+  return `<span class="av"${st}>${c.flag}</span>`;
+}
 
 // جلب عدّادات الإعجابات/التعليقات الحقيقية دفعة واحدة وتحديث الواجهة
 async function hydrateEngagement(type) {
@@ -107,6 +115,7 @@ async function hydrateEngagement(type) {
 const NAV = [
   ['#/', 'الرئيسية', 'home'],
   ['#/dispatches', 'البرقيات', 'chat'],
+  ['#/messages', 'الرسائل', 'mail'],
   ['#/cat/official', 'بيانات رسمية', 'mega'],
   ['#/cat/war', 'سيناريوهات الحروب', 'zap'],
   ['#/cat/events', 'أحداث اللعبة', 'cal'],
@@ -118,8 +127,16 @@ function renderNav(active) {
   nav.innerHTML = [...NAV, dashLink].map(([h, t, ic]) =>
     `<a class="nav-link${h === active ? ' active' : ''}" href="${h}">${ICONS[ic]}<span>${t}</span></a>`).join('');
   const bn = document.getElementById('bottomnav');
-  bn.innerHTML = [...NAV.slice(0, 2), ['#/dossiers', '', 'folder'], dashLink].map(([h, , ic]) =>
+  bn.innerHTML = [...NAV.slice(0, 3), dashLink].map(([h, , ic]) =>
     `<a class="${h === active ? 'active' : ''}" href="${h}">${ICONS[ic]}</a>`).join('');
+  if (me) {
+    api('GET', '/conversations').then((list) => {
+      const n = (list || []).reduce((s, c) => s + (c.unread || 0), 0);
+      if (n > 0) document.querySelectorAll('a[href="#/messages"]').forEach((a) => {
+        if (!a.querySelector('.unread')) a.insertAdjacentHTML('beforeend', `<span class="unread">${n}</span>`);
+      });
+    }).catch(() => {});
+  }
   document.querySelector('.cb-ic').innerHTML = ICONS.feather;
   document.getElementById('composeBtn').onclick = () => {
     location.hash = me ? '#/dash' : '#/login';
@@ -129,7 +146,7 @@ function renderNav(active) {
   if (me) {
     const c = countryOf(me.country_code);
     nu.innerHTML = `<button class="nav-user" id="nuBtn">
-      <span class="av">${c.flag}</span>
+      ${avHTML(me)}
       <span class="nu-tx"><span class="nu-name">${esc(me.username)}</span><br><span class="nu-handle">@${esc(me.username)}</span></span>
       <span class="nu-go">···</span></button>`;
     document.getElementById('nuBtn').onclick = () => { location.hash = '#/u/' + encodeURIComponent(me.username); };
@@ -172,7 +189,7 @@ function tweetHTML(d) {
   const views = fmtN(baseCount(d.id, 13) + 40);
   const isHQ = d.author.country_code === 'HQ';
   return `<article class="tweet" data-kind="d" data-id="${d.id}">
-    <span class="av" data-user="${esc(d.author.username)}" style="cursor:pointer">${c.flag}</span>
+    <span data-user="${esc(d.author.username)}" style="cursor:pointer;display:inline-flex">${avHTML(d.author)}</span>
     <div class="tw-main">
       <div class="tw-head">
         <span class="tw-name" data-user="${esc(d.author.username)}" style="cursor:pointer">${esc(c.name)}</span>${isHQ ? ICONS.checkGold : ICONS.check}
@@ -199,7 +216,7 @@ function articleCardHTML(a) {
     ${a.image ? `<img class="ac-img" src="${esc(a.image)}" loading="lazy" alt="">` : ''}
     <h3>${esc(a.title)}</h3>
     <p>${esc(excerpt(a.body, 160))}</p>
-    <div class="tw-head"><span class="av" style="width:30px;height:30px;font-size:1rem" data-user="${esc(a.author.username)}">${c.flag}</span>
+    <div class="tw-head"><span data-user="${esc(a.author.username)}" style="cursor:pointer;display:inline-flex">${avHTML(a.author, 30)}</span>
       <span class="tw-name" style="font-size:.85rem" data-user="${esc(a.author.username)}">${esc(c.name)}</span>
       <span class="tw-handle">@${esc(a.author.username)} · ${timeAgo(a.created_at)}</span></div>
     <div class="tw-actions">
@@ -262,7 +279,7 @@ function composerHTML() {
   if (!me) return '';
   const c = countryOf(me.country_code);
   return `<div class="composer">
-    <span class="av">${c.flag}</span>
+    ${avHTML(me)}
     <div class="c-main">
       <div id="msg"></div>
       <textarea id="cbody" maxlength="500" placeholder="بماذا تودّ أن تُصرّح يا ${esc(c.name)}؟"></textarea>
@@ -365,7 +382,7 @@ async function vArticle(id) {
       <div class="detail" data-kind="a" data-id="${a.id}"><div class="d-pad">
         <span class="tw-cat${gold ? ' gold' : ''}">${esc(a.category_label)}</span>
         <h1>${esc(a.title)}</h1>
-        <div class="tw-head"><span class="av" style="width:38px;height:38px;font-size:1.3rem" data-user="${esc(a.author.username)}">${c.flag}</span>
+        <div class="tw-head"><span data-user="${esc(a.author.username)}" style="cursor:pointer;display:inline-flex">${avHTML(a.author, 38)}</span>
           <span class="tw-name" data-user="${esc(a.author.username)}" style="cursor:pointer">${esc(c.name)}</span>${a.author.country_code === 'HQ' ? ICONS.checkGold : ICONS.check}
           <span class="tw-handle">@${esc(a.author.username)} · ${timeAgo(a.created_at)}</span>
           ${canDel ? `<button class="btn danger" style="margin-inline-start:auto" onclick="delArticle(${a.id})">حذف المقال</button>` : ''}
@@ -517,7 +534,7 @@ async function vDash() {
       <div class="hint">${mine_d} برقية · ${mine_a} مقال</div></div></div>
     <div class="cover"></div>
     <div class="prow">
-      <div class="p-av">${c.flag}</div>
+      <div class="p-av">${me.avatar ? `<img src="${esc(me.avatar)}">` : c.flag}</div>
       <div class="p-head"><div class="p-id">
         <div class="p-name">${esc(c.name)} ${me.role === 'admin' ? ICONS.checkGold : ICONS.check}</div>
         <div class="p-handle">@${esc(me.username)}</div></div>
@@ -578,10 +595,32 @@ async function dashTab(t) {
       <button class="btn" style="width:auto;padding:12px 44px" onclick="sendArticle()">نشر المقال</button></div>`;
   } else if (t === 'edit') {
     body.innerHTML = `<div class="form-dark"><h2>تعديل البروفايل</h2><div id="msg"></div>
+      <div class="field"><label>الصورة الشخصية</label>
+        <div class="pav-row">
+          <span id="pavprev">${avHTML(me, 64)}</span>
+          <label class="filebtn">${ICONS.img} اختر صورة<input id="pavatar" type="file" accept="image/*" style="display:none"></label>
+          <button class="btn ghost" id="pavrm" style="width:auto;padding:8px 16px">إزالة</button>
+        </div>
+        <input id="pavatarurl" type="hidden" value="${esc(me.avatar || '')}"></div>
       <div class="field"><label>النبذة التعريفية (البايو) — 160 حرفًا كحد أقصى</label>
         <textarea id="pbio" maxlength="160" placeholder="عرّف بنفسك وبمشروع دولتك…">${esc(me.bio || '')}</textarea></div>
-      <button class="btn" style="width:auto;padding:12px 44px" onclick="saveBio()">حفظ البايو</button>
+      <button class="btn" style="width:auto;padding:12px 44px" onclick="saveProfile()">حفظ البروفايل</button>
       <a class="btn ghost" href="#/u/${esc(me.username)}" style="margin-inline-start:8px">معاينة بروفايلي</a></div>`;
+    document.getElementById('pavatar').onchange = async (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      const m2 = (tx, ok) => { const m = document.getElementById('msg'); if (m) m.innerHTML = tx ? `<div class="${ok ? 'ok' : 'err'}">${esc(tx)}</div>` : ''; };
+      try {
+        m2('جارٍ رفع الصورة…', true);
+        const url = await uploadImage(f);
+        document.getElementById('pavatarurl').value = url;
+        document.getElementById('pavprev').innerHTML = avHTML({ avatar: url }, 64);
+        m2('', true);
+      } catch (err) { m2(err.message, false); }
+    };
+    document.getElementById('pavrm').onclick = () => {
+      document.getElementById('pavatarurl').value = '';
+      document.getElementById('pavprev').innerHTML = avHTML({ country_code: me.country_code }, 64);
+    };
   } else {
     body.innerHTML = '<div class="spin"></div>';
     await vDashDossier(body);
@@ -610,11 +649,12 @@ async function delDispatch(id) {
   if (!confirm('حذف هذه البرقية؟')) return;
   await api('DELETE', `/dispatches/${id}`); dashTab('feed');
 }
-async function saveBio() {
+async function saveProfile() {
   try {
-    const r = await api('POST', '/profile', { bio: val('pbio') });
-    me.bio = r.bio;
-    msg('تم حفظ البايو ✓', true);
+    const r = await api('POST', '/profile', { bio: val('pbio'), avatar: document.getElementById('pavatarurl').value });
+    me.bio = r.bio; me.avatar = r.avatar;
+    msg('تم حفظ البروفايل ✓', true);
+    renderNav(navKey(location.hash || '#/'));
   } catch (e) { msg(e.message, false); }
 }
 async function vDashDossier(body) {
@@ -680,7 +720,7 @@ function commentsHTML() {
   const c = me ? countryOf(me.country_code) : null;
   return `<div class="comments"><div class="sec-h">التعليقات</div>
     <div id="clist"><div class="spin"></div></div>
-    ${me ? `<div class="cform"><span class="av" style="width:38px;height:38px;font-size:1.2rem">${c.flag}</span>
+    ${me ? `<div class="cform">${avHTML(me, 38)}
       <input id="cinput" maxlength="500" placeholder="اكتب تعليقك…">
       <button class="c-post" id="csend">نشر</button></div>`
     : `<p class="hint" style="padding:0 18px 16px"><a href="#/login" style="color:var(--accent)">سجّل الدخول</a> للمشاركة في التعليقات</p>`}
@@ -694,7 +734,7 @@ async function loadComments(type, id) {
     box.innerHTML = list.length ? list.map((cm) => {
       const cc = countryOf(cm.author.country_code);
       const canDel = me && (me.username === cm.author.username || me.role === 'admin');
-      return `<div class="comment"><span class="av" style="width:38px;height:38px;font-size:1.25rem">${cc.flag}</span>
+      return `<div class="comment">${avHTML(cm.author, 38)}
         <div class="cm-main"><div class="cm-head">
           <span class="tw-name" data-user="${esc(cm.author.username)}" style="cursor:pointer">${esc(cc.name)}</span>
           <span class="tw-handle">@${esc(cm.author.username)} · ${timeAgo(cm.created_at)}</span>
@@ -729,13 +769,13 @@ async function storyBarHTML() {
     const mine = STORY_GROUPS.find((g) => g.user.username === me.username);
     if (mine) {
       const c = countryOf(mine.user.country_code);
-      items += `<div class="story" data-suser="${esc(mine.user.username)}"><span class="s-ring seen">${c.flag}</span><span class="s-name">${esc(mine.user.username)}</span></div>`;
+      items += `<div class="story" data-suser="${esc(mine.user.username)}"><span class="s-ring seen">${mine.user.avatar ? `<img class="ring-img" src="${esc(mine.user.avatar)}">` : c.flag}</span><span class="s-name">${esc(mine.user.username)}</span></div>`;
     }
   }
   for (const g of STORY_GROUPS) {
     if (me && g.user.username === me.username) continue;
     const c = countryOf(g.user.country_code);
-    items += `<div class="story" data-suser="${esc(g.user.username)}"><span class="s-ring">${c.flag}</span><span class="s-name">${esc(g.user.username)}</span></div>`;
+    items += `<div class="story" data-suser="${esc(g.user.username)}"><span class="s-ring">${g.user.avatar ? `<img class="ring-img" src="${esc(g.user.avatar)}">` : c.flag}</span><span class="s-name">${esc(g.user.username)}</span></div>`;
   }
   return `<div class="stories">${items || '<span class="hint">لا توجد ستوريات بعد</span>'}</div>`;
 }
@@ -795,7 +835,7 @@ function openStory(username) {
     const canDel = me && g.user.username === me.username;
     ov.innerHTML = `<div class="sview">
       <div class="sv-prog">${g.stories.map((_, k) => `<span><i class="${k < i ? 'done' : k === i ? 'run' : ''}"></i></span>`).join('')}</div>
-      <div class="sv-head"><span class="av">${c.flag}</span>
+      <div class="sv-head">${avHTML(g.user)}
         <span class="tw-name" style="color:#fff">${esc(g.user.username)}</span>
         <span class="tw-handle">· ${timeAgo(s.created_at)}</span>
         <span style="margin-inline-start:auto;display:flex;gap:4px">
@@ -896,11 +936,13 @@ async function vUser(username) {
 function navKey(h) {
   if (h === '#/' || h === '') return '#/';
   if (h.startsWith('#/cat/')) return '#/cat/' + h.split('/')[2];
-  if (h === '#/dispatches' || h === '#/dossiers' || h === '#/dash' || h === '#/login') return h;
+  if (h === '#/dispatches' || h === '#/dossiers' || h === '#/dash' || h === '#/login' || h === '#/messages') return h;
+  if (h.startsWith('#/messages/')) return '#/messages';
   if (h.startsWith('#/d/')) return '#/dispatches';
   return null;
 }
 async function route() {
+  clearMsgTimer();
   const h = location.hash || '#/';
   renderNav(navKey(h));
   try {
@@ -909,6 +951,8 @@ async function route() {
     else if (h.startsWith('#/article/')) await vArticle(h.split('/')[2]);
     else if (h.startsWith('#/d/')) await vDispatch(h.split('/')[2]);
     else if (h.startsWith('#/u/')) await vUser(decodeURIComponent(h.split('/')[2] || ''));
+    else if (h.startsWith('#/messages/')) await vThread(decodeURIComponent(h.split('/')[2] || ''));
+    else if (h === '#/messages') await vMessages();
     else if (h === '#/dispatches') await vDispatches();
     else if (h === '#/dossiers') await vDossiers();
     else if (h.startsWith('#/dossier/')) await vDossier(decodeURIComponent(h.split('/')[2] || ''));
@@ -918,6 +962,146 @@ async function route() {
     else await vHome();
   } catch (e) { app.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
   window.scrollTo(0, 0);
+}
+
+// ---------- الرسائل الخاصة (ماسنجر) ----------
+let MSG_TIMER = null;
+function clearMsgTimer() { if (MSG_TIMER) { clearInterval(MSG_TIMER); MSG_TIMER = null; } }
+// عارض صور مكبر
+function openViewer(src) {
+  const ov = document.createElement('div');
+  ov.className = 'modal-ov';
+  ov.innerHTML = `<div class="viewer-card"><img src="${esc(src)}"><button class="m-x" id="vx">✕</button></div>`;
+  document.body.appendChild(ov);
+  const close = () => ov.remove();
+  document.getElementById('vx').onclick = close;
+  ov.onclick = (e) => { if (e.target === ov) close(); };
+}
+
+async function vMessages() {
+  if (!me) { location.hash = '#/login'; return; }
+  app.innerHTML = thead('الرسائل')
+    + `<button class="btn" id="newmsg" style="width:auto;padding:10px 24px;margin:12px 18px">✉️ رسالة جديدة</button>
+    <div id="convlist"><div class="spin"></div></div>`;
+  document.getElementById('newmsg').onclick = openNewMsg;
+  const load = async () => {
+    try {
+      const list = await api('GET', '/conversations');
+      const box = document.getElementById('convlist');
+      if (!box) return;
+      box.innerHTML = list.length ? list.map((cv) => `
+        <a class="conv" href="#/messages/${esc(cv.user.username)}">
+          ${avHTML(cv.user, 52)}
+          <span class="conv-tx"><span class="conv-top"><b class="conv-name">${esc(cv.user.username)}</b><span class="tw-handle">${timeAgo(cv.last.created_at)}</span></span>
+          <span class="conv-last">${cv.last.mine ? 'أنت: ' : ''}${cv.last.image ? '📷 صورة' : esc(excerpt(cv.last.body, 55))}</span></span>
+          ${cv.unread ? `<span class="unread">${cv.unread}</span>` : ''}
+        </a>`).join('')
+        : '<div class="empty"><span class="e-ic">✉️</span>لا توجد محادثات بعد.<br>ابدأ رسالة جديدة وتحدث مع اللاعبين.</div>';
+    } catch (e) { /* صامت */ }
+  };
+  await load();
+  clearMsgTimer();
+  MSG_TIMER = setInterval(load, 5000);
+}
+
+async function openNewMsg() {
+  const ov = document.createElement('div');
+  ov.className = 'modal-ov';
+  ov.innerHTML = `<div class="modal-card"><div class="m-head"><b>رسالة جديدة</b><button class="m-x" id="nmx">✕</button></div>
+    <input id="nmq" class="m-input" placeholder="ابحث عن لاعب…">
+    <div id="nmlist"><div class="spin"></div></div></div>`;
+  document.body.appendChild(ov);
+  const close = () => ov.remove();
+  document.getElementById('nmx').onclick = close;
+  ov.onclick = (e) => { if (e.target === ov) close(); };
+  let users = [];
+  try { users = await api('GET', '/users'); } catch (e) { users = []; }
+  const list = document.getElementById('nmlist');
+  const draw = (q) => {
+    const f = users.filter((u) => !q || u.username.includes(q));
+    list.innerHTML = f.length ? f.map((u) => `
+      <div class="conv" data-u="${esc(u.username)}" style="cursor:pointer">
+        ${avHTML(u, 44)}
+        <span class="conv-tx"><b class="conv-name">${esc(u.username)}</b>
+        <span class="conv-last">${esc(countryOf(u.country_code).name)}</span></span>
+      </div>`).join('')
+      : '<div class="empty">لا يوجد لاعبون بعد.</div>';
+    list.querySelectorAll('.conv').forEach((el) => {
+      el.onclick = () => { close(); location.hash = '#/messages/' + encodeURIComponent(el.dataset.u); };
+    });
+  };
+  draw('');
+  document.getElementById('nmq').oninput = (e) => draw(e.target.value.trim());
+}
+
+async function vThread(username) {
+  if (!me) { location.hash = '#/login'; return; }
+  clearMsgTimer();
+  app.innerHTML = `<div class="th-head">
+      <button class="backbtn" onclick="location.hash='#/messages'">${ICONS.back}</button>
+      <div id="thuser"><div class="spin" style="width:24px;height:24px"></div></div>
+    </div>
+    <div id="thread" class="thread"><div class="spin"></div></div>
+    <div class="c-prev" id="tprev" style="display:none"><img id="tprevimg"><button id="tpremx">✕</button></div>
+    <div class="cform tform">
+      <button class="c-ic" id="timgbtn" title="صورة">${ICONS.img}</button>
+      <input type="file" id="timg" accept="image/*" style="display:none">
+      <input id="tinput" maxlength="1000" placeholder="اكتب رسالة…" autocomplete="off">
+      <button class="c-post" id="tsend">إرسال</button>
+    </div>`;
+  const thread = document.getElementById('thread');
+  const input = document.getElementById('tinput');
+  let lastId = 0;
+  const bHTML = (m) => {
+    const mine = m.sender === me.username;
+    return `<div class="msg ${mine ? 'mine' : 'theirs'}">
+      ${m.image ? `<img class="msg-img" src="${esc(m.image)}" onclick="openViewer('${esc(m.image)}')">` : ''}
+      ${m.body ? `<div class="bubble">${esc(m.body)}</div>` : ''}
+      <span class="msg-t">${timeAgo(m.created_at)}</span>
+    </div>`;
+  };
+  const scroll = () => { thread.scrollTop = thread.scrollHeight; };
+  const load = async (first) => {
+    try {
+      const d = await api('GET', '/messages/' + encodeURIComponent(username));
+      if (!document.getElementById('thread')) return;
+      document.getElementById('thuser').innerHTML = `<a class="th-u" href="#/u/${esc(d.user.username)}">
+        ${avHTML(d.user, 40)}<span class="th-un"><b>${esc(d.user.username)}</b><span class="tw-handle">${esc(countryOf(d.user.country_code).name)}</span></span></a>`;
+      const msgs = d.messages || [];
+      if (first || (msgs.length && msgs[msgs.length - 1].id !== lastId)) {
+        thread.innerHTML = msgs.length ? msgs.map(bHTML).join('') : '<div class="empty">ابدأ المحادثة 👋</div>';
+        lastId = msgs.length ? msgs[msgs.length - 1].id : 0;
+        scroll();
+      }
+    } catch (e) { if (first) thread.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  };
+  const send = async () => {
+    const body = input.value.trim();
+    const pv = document.getElementById('tprev');
+    const img = pv.style.display !== 'none' ? (document.getElementById('tprevimg').dataset.url || '') : '';
+    if (!body && !img) return;
+    input.value = '';
+    pv.style.display = 'none';
+    try {
+      await api('POST', '/messages', { to: username, body, image: img });
+      await load(true);
+    } catch (e) { alert(e.message); }
+  };
+  document.getElementById('tsend').onclick = send;
+  input.onkeydown = (e) => { if (e.key === 'Enter') send(); };
+  document.getElementById('timgbtn').onclick = () => document.getElementById('timg').click();
+  document.getElementById('timg').onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      const url = await uploadImage(f);
+      const pi = document.getElementById('tprevimg');
+      pi.src = url; pi.dataset.url = url;
+      document.getElementById('tprev').style.display = 'block';
+    } catch (err) { alert(err.message); }
+  };
+  document.getElementById('tpremx').onclick = () => { document.getElementById('tprev').style.display = 'none'; };
+  await load(true);
+  MSG_TIMER = setInterval(() => load(false), 4000);
 }
 
 // ---------- بدء ----------

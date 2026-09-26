@@ -128,6 +128,19 @@ async function initDb() {
   )`);
   // البايو في البروفايل
   try { await q("ALTER TABLE users ADD COLUMN bio TEXT DEFAULT ''"); } catch (e) { /* موجود مسبقًا */ }
+  // الصورة الشخصية
+  try { await q("ALTER TABLE users ADD COLUMN avatar TEXT DEFAULT ''"); } catch (e) { /* موجود مسبقًا */ }
+  // الرسائل الخاصة
+  await q(`CREATE TABLE IF NOT EXISTS messages (
+    id SERIAL PRIMARY KEY,
+    sender_id INTEGER NOT NULL,
+    receiver_id INTEGER NOT NULL,
+    body TEXT NOT NULL DEFAULT '',
+    image TEXT,
+    created_at BIGINT NOT NULL,
+    read_at BIGINT
+  )`);
+  await q('CREATE INDEX IF NOT EXISTS idx_messages_pair ON messages(sender_id, receiver_id, created_at)');
   await q('CREATE INDEX IF NOT EXISTS idx_likes_target ON likes(target_type, target_id)');
   await q('CREATE INDEX IF NOT EXISTS idx_comments_target ON comments(target_type, target_id)');
   await q('CREATE INDEX IF NOT EXISTS idx_stories_exp ON stories(expires_at)');
@@ -212,7 +225,7 @@ async function auth(req, res, next) {
   const t = getToken(req);
   if (!t) return res.status(401).json({ error: 'يجب تسجيل الدخول أولاً' });
   const row = await one(
-    'SELECT u.id,u.username,u.email,u.country_code,u.role,u.bio FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at>$2',
+    'SELECT u.id,u.username,u.email,u.country_code,u.role,u.bio,u.avatar FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at>$2',
     [t, Date.now()]
   );
   if (!row) return res.status(401).json({ error: 'انتهت الجلسة، سجّل الدخول مجددًا' });
@@ -342,7 +355,7 @@ app.get('/api/me', ah(async (req, res) => {
   const t = getToken(req);
   if (!t) return res.json({ user: null });
   const row = await one(
-    'SELECT u.id,u.username,u.email,u.country_code,u.role,u.bio FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at>$2',
+    'SELECT u.id,u.username,u.email,u.country_code,u.role,u.bio,u.avatar FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at>$2',
     [t, Date.now()]
   );
   res.json({ user: row || null });
@@ -367,7 +380,7 @@ function articleRow(a) {
     id: a.id, title: a.title, body: a.body, image: a.image,
     category: a.category, category_label: CATEGORIES[a.category] || a.category,
     created_at: Number(a.created_at),
-    author: { username: a.username, country_code: a.country_code, role: a.role },
+    author: { username: a.username, country_code: a.country_code, role: a.role, avatar: a.avatar || '' },
   };
 }
 app.get('/api/articles', ah(async (req, res) => {
@@ -376,13 +389,13 @@ app.get('/api/articles', ah(async (req, res) => {
   let rows;
   if (category && CATEGORIES[category]) {
     rows = await all(
-      `SELECT a.*,u.username,u.country_code,u.role FROM articles a JOIN users u ON u.id=a.user_id
+      `SELECT a.*,u.username,u.country_code,u.role,u.avatar FROM articles a JOIN users u ON u.id=a.user_id
        WHERE a.category=$1 ORDER BY a.created_at DESC LIMIT $2`,
       [category, lim]
     );
   } else {
     rows = await all(
-      `SELECT a.*,u.username,u.country_code,u.role FROM articles a JOIN users u ON u.id=a.user_id
+      `SELECT a.*,u.username,u.country_code,u.role,u.avatar FROM articles a JOIN users u ON u.id=a.user_id
        ORDER BY a.created_at DESC LIMIT $1`,
       [lim]
     );
@@ -391,7 +404,7 @@ app.get('/api/articles', ah(async (req, res) => {
 }));
 app.get('/api/articles/:id', ah(async (req, res) => {
   const a = await one(
-    'SELECT a.*,u.username,u.country_code,u.role FROM articles a JOIN users u ON u.id=a.user_id WHERE a.id=$1',
+    'SELECT a.*,u.username,u.country_code,u.role,u.avatar FROM articles a JOIN users u ON u.id=a.user_id WHERE a.id=$1',
     [req.params.id]
   );
   if (!a) return res.status(404).json({ error: 'المقال غير موجود' });
@@ -425,13 +438,13 @@ app.delete('/api/articles/:id', ah(auth), ah(async (req, res) => {
 function dispatchRow(d) {
   return {
     id: d.id, body: d.body, image: d.image, created_at: Number(d.created_at),
-    author: { username: d.username, country_code: d.country_code },
+    author: { username: d.username, country_code: d.country_code, avatar: d.avatar || '' },
   };
 }
 app.get('/api/dispatches', ah(async (req, res) => {
   const lim = Math.min(Math.max(parseInt(req.query.limit) || 30, 1), 100);
   const rows = await all(
-    `SELECT d.*,u.username,u.country_code FROM dispatches d JOIN users u ON u.id=d.user_id
+    `SELECT d.*,u.username,u.country_code,u.avatar FROM dispatches d JOIN users u ON u.id=d.user_id
      ORDER BY d.created_at DESC LIMIT $1`,
     [lim]
   );
@@ -515,13 +528,13 @@ app.get('/api/comments/:type/:id', ah(async (req, res) => {
   const { type } = req.params;
   if (!TGT.includes(type)) return res.status(400).json({ error: 'نوع غير صالح' });
   const rows = await all(
-    `SELECT c.*,u.username,u.country_code FROM comments c JOIN users u ON u.id=c.user_id
+    `SELECT c.*,u.username,u.country_code,u.avatar FROM comments c JOIN users u ON u.id=c.user_id
      WHERE c.target_type=$1 AND c.target_id=$2 ORDER BY c.created_at ASC LIMIT 200`,
     [type, parseInt(req.params.id, 10) || 0]
   );
   res.json(rows.map((c) => ({
     id: c.id, body: c.body, created_at: Number(c.created_at),
-    author: { username: c.username, country_code: c.country_code },
+    author: { username: c.username, country_code: c.country_code, avatar: c.avatar || '' },
   })));
 }));
 app.post('/api/comments', ah(auth), ah(async (req, res) => {
@@ -553,12 +566,12 @@ app.get('/api/stories', ah(async (req, res) => {
   const now = Date.now();
   await q('DELETE FROM stories WHERE expires_at <= $1', [now]); // تنظيف المنتهية
   const rows = await all(
-    `SELECT s.*,u.username,u.country_code FROM stories s JOIN users u ON u.id=s.user_id
+    `SELECT s.*,u.username,u.country_code,u.avatar FROM stories s JOIN users u ON u.id=s.user_id
      WHERE s.expires_at > $1 ORDER BY s.created_at DESC LIMIT 120`, [now]
   );
   const map = {};
   for (const r of rows) {
-    (map[r.username] = map[r.username] || { user: { username: r.username, country_code: r.country_code }, stories: [] })
+    (map[r.username] = map[r.username] || { user: { username: r.username, country_code: r.country_code, avatar: r.avatar || '' }, stories: [] })
       .stories.push({ id: r.id, body: r.body || '', image: r.image, created_at: Number(r.created_at) });
   }
   const groups = Object.values(map);
@@ -588,29 +601,108 @@ app.delete('/api/stories/:id', ah(auth), ah(async (req, res) => {
 
 // ---------- البروفايلات العامة + البايو ----------
 app.get('/api/user/:username', ah(async (req, res) => {
-  const u = await one('SELECT id,username,country_code,role,bio,created_at FROM users WHERE username=$1', [req.params.username]);
+  const u = await one('SELECT id,username,country_code,role,bio,avatar,created_at FROM users WHERE username=$1', [req.params.username]);
   if (!u || u.username === 'argos_hq') return res.status(404).json({ error: 'المستخدم غير موجود' });
   const dc = await one('SELECT COUNT(*) AS c FROM dispatches WHERE user_id=$1', [u.id]);
   const ac = await one('SELECT COUNT(*) AS c FROM articles WHERE user_id=$1', [u.id]);
   res.json({
-    user: { username: u.username, country_code: u.country_code, role: u.role, bio: u.bio || '', created_at: Number(u.created_at) },
+    user: { username: u.username, country_code: u.country_code, role: u.role, bio: u.bio || '', avatar: u.avatar || '', created_at: Number(u.created_at) },
     stats: { dispatches: Number(dc.c), articles: Number(ac.c) },
   });
 }));
 app.post('/api/profile', ah(auth), ah(async (req, res) => {
   const bio = String((req.body || {}).bio || '').slice(0, 160);
-  await q('UPDATE users SET bio=$1 WHERE id=$2', [bio, req.user.id]);
-  res.json({ ok: true, bio });
+  const avatar = cleanImage((req.body || {}).avatar) || '';
+  await q('UPDATE users SET bio=$1, avatar=$2 WHERE id=$3', [bio, avatar, req.user.id]);
+  res.json({ ok: true, bio, avatar });
 }));
 
 // برقية واحدة (صفحة التفاصيل)
 app.get('/api/dispatches/:id', ah(async (req, res) => {
   const d = await one(
-    'SELECT d.*,u.username,u.country_code FROM dispatches d JOIN users u ON u.id=d.user_id WHERE d.id=$1',
+    'SELECT d.*,u.username,u.country_code,u.avatar FROM dispatches d JOIN users u ON u.id=d.user_id WHERE d.id=$1',
     [req.params.id]
   );
   if (!d) return res.status(404).json({ error: 'البرقية غير موجودة' });
   res.json(dispatchRow(d));
+}));
+
+// ---------- الرسائل الخاصة ----------
+// قائمة المستخدمين (لبدء محادثة جديدة)
+app.get('/api/users', ah(auth), ah(async (req, res) => {
+  const rows = await all("SELECT username,country_code,avatar FROM users WHERE id!=$1 AND role!='system' ORDER BY username ASC LIMIT 200", [req.user.id]);
+  res.json(rows.map((u) => ({ username: u.username, country_code: u.country_code, avatar: u.avatar || '' })));
+}));
+// قائمة المحادثات
+app.get('/api/conversations', ah(auth), ah(async (req, res) => {
+  const rows = await all(
+    `SELECT m.*, a.username AS s_name, a.country_code AS s_cc, a.avatar AS s_av,
+            b.username AS r_name, b.country_code AS r_cc, b.avatar AS r_av
+     FROM messages m
+     JOIN users a ON a.id=m.sender_id
+     JOIN users b ON b.id=m.receiver_id
+     WHERE m.sender_id=$1 OR m.receiver_id=$1
+     ORDER BY m.created_at DESC LIMIT 500`, [req.user.id]);
+  const map = {};
+  for (const r of rows) {
+    const mine = r.sender_id === req.user.id;
+    const uname = mine ? r.r_name : r.s_name;
+    if (!map[uname]) map[uname] = {
+      user: { username: uname, country_code: mine ? r.r_cc : r.s_cc, avatar: (mine ? r.r_av : r.s_av) || '' },
+      last: null, unread: 0,
+    };
+    const cv = map[uname];
+    if (!cv.last) cv.last = { body: r.body || '', image: r.image, created_at: Number(r.created_at), mine };
+    if (!mine && !r.read_at) cv.unread++;
+  }
+  const list = Object.values(map);
+  list.sort((x, y) => y.last.created_at - x.last.created_at);
+  res.json(list);
+}));
+// محادثة مع مستخدم (وتعليم المقروء)
+app.get('/api/messages/:username', ah(auth), ah(async (req, res) => {
+  const other = await one("SELECT id,username,country_code,avatar FROM users WHERE username=$1 AND role!='system'", [req.params.username]);
+  if (!other) return res.status(404).json({ error: 'المستخدم غير موجود' });
+  if (other.id === req.user.id) return res.status(400).json({ error: 'لا يمكنك مراسلة نفسك' });
+  await q('UPDATE messages SET read_at=$1 WHERE sender_id=$2 AND receiver_id=$3 AND read_at IS NULL', [Date.now(), other.id, req.user.id]);
+  const rows = await all(
+    `SELECT m.*,u.username AS sender FROM messages m JOIN users u ON u.id=m.sender_id
+     WHERE (m.sender_id=$1 AND m.receiver_id=$2) OR (m.sender_id=$2 AND m.receiver_id=$1)
+     ORDER BY m.created_at DESC LIMIT 100`,
+    [req.user.id, other.id]
+  );
+  rows.reverse();
+  res.json({
+    user: { username: other.username, country_code: other.country_code, avatar: other.avatar || '' },
+    messages: rows.map((m) => ({
+      id: m.id, sender: m.sender, body: m.body || '', image: m.image,
+      created_at: Number(m.created_at),
+    })),
+  });
+}));
+// إرسال رسالة
+app.post('/api/messages', ah(auth), ah(async (req, res) => {
+  const { to, body, image } = req.body || {};
+  const other = await one("SELECT id FROM users WHERE username=$1 AND role!='system'", [to]);
+  if (!other) return res.status(404).json({ error: 'المستخدم غير موجود' });
+  if (other.id === req.user.id) return res.status(400).json({ error: 'لا يمكنك مراسلة نفسك' });
+  const b = String(body || '').trim().slice(0, 1000);
+  const img = cleanImage(image);
+  if (!b && !img) return res.status(400).json({ error: 'الرسالة فارغة' });
+  const r = await one(
+    'INSERT INTO messages (sender_id,receiver_id,body,image,created_at) VALUES ($1,$2,$3,$4,$5) RETURNING id,created_at',
+    [req.user.id, other.id, b, img, Date.now()]
+  );
+  res.json({ ok: true, id: r.id, created_at: Number(r.created_at) });
+}));
+// حذف رسالة
+app.delete('/api/messages/:id', ah(auth), ah(async (req, res) => {
+  const m = await one('SELECT sender_id FROM messages WHERE id=$1', [req.params.id]);
+  if (!m) return res.status(404).json({ error: 'الرسالة غير موجودة' });
+  if (m.sender_id !== req.user.id && req.user.role !== 'admin')
+    return res.status(403).json({ error: 'لا تملك صلاحية الحذف' });
+  await q('DELETE FROM messages WHERE id=$1', [req.params.id]);
+  res.json({ ok: true });
 }));
 
 // ---------- الصفحة الرئيسية (التطبيق) ----------
