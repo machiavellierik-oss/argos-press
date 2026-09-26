@@ -184,6 +184,11 @@ async function initDb() {
   )`);
   const gc = await one('SELECT id FROM game_clock WHERE id=1');
   if (!gc) await q('INSERT INTO game_clock (id,started_at,running) VALUES (1,NULL,0)');
+  // تعديلات المطورين على خريطة غرفة الحرب: لون/حالة/حدود مخصصة لكل دولة
+  await q(`CREATE TABLE IF NOT EXISTS map_states (
+    country_code TEXT PRIMARY KEY, color TEXT, status TEXT,
+    label TEXT, borders_geojson TEXT, updated_by INTEGER, updated_at BIGINT
+  )`);
   const n = await one('SELECT COUNT(*) AS c FROM articles');
   if (Number(n.c) === 0) {
     await q(
@@ -564,6 +569,61 @@ app.post('/api/clock/reset', ah(auth), requireDeveloper, ah(async (req, res) => 
   const now = Date.now();
   await q('UPDATE game_clock SET started_at=$1, running=1, updated_by=$2 WHERE id=1', [now, req.user.id]);
   res.json({ ok: true, running: true, started_at: now, game: gameDateOf(now, now) });
+}));
+
+// ---------- خريطة غرفة الحرب: تعديلات المطورين (لون/حالة/حدود) ----------
+// عام للقراءة — يغذي ألوان الكرة وإعلانات الحرب/الطوارئ
+app.get('/api/map-states', ah(async (req, res) => {
+  const rows = await all('SELECT country_code,color,status,label,borders_geojson,updated_at FROM map_states');
+  res.json({
+    states: rows.map((s) => ({
+      country_code: s.country_code, color: s.color, status: s.status,
+      label: s.label, borders_geojson: s.borders_geojson,
+      updated_at: Number(s.updated_at),
+      lat: (LATLON[s.country_code] || [])[0] ?? null,
+      lon: (LATLON[s.country_code] || [])[1] ?? null,
+    })),
+  });
+}));
+const MAP_STATUS = ['war', 'emergency', 'peace'];
+function cleanMapState(b) {
+  const out = {};
+  if (typeof b.country_code !== 'string' || !validCountry(b.country_code)) throw new Error('كود دولة غير صالح');
+  out.country_code = b.country_code;
+  out.color = /^#[0-9a-fA-F]{6}$/.test(b.color || '') ? b.color : null;
+  out.status = MAP_STATUS.includes(b.status) ? b.status : null;
+  out.label = typeof b.label === 'string' && b.label.trim() ? b.label.trim().slice(0, 120) : null;
+  out.borders_geojson = null;
+  if (typeof b.borders_geojson === 'string' && b.borders_geojson.trim()) {
+    const g = JSON.parse(b.borders_geojson);
+    const okType = g && (g.type === 'Polygon' || g.type === 'MultiPolygon');
+    const coords = g.type === 'Polygon' ? g.coordinates : g.coordinates.flat();
+    const okCoords = Array.isArray(g.coordinates) && coords.every((ring) =>
+      Array.isArray(ring) && ring.length >= 3 && ring.every((p) =>
+        Array.isArray(p) && p.length >= 2 && p.slice(0, 2).every((n) => typeof n === 'number' && isFinite(n))));
+    if (!okType || !okCoords) throw new Error('GeoJSON غير صالح (Polygon/MultiPolygon بإحداثيات رقمية)');
+    const s = JSON.stringify(g);
+    if (s.length > 300000) throw new Error('حجم الحدود كبير جدًا');
+    out.borders_geojson = s;
+  }
+  return out;
+}
+app.post('/api/map-states', ah(auth), requireDeveloper, ah(async (req, res) => {
+  let s;
+  try { s = cleanMapState(req.body || {}); }
+  catch (e) { return res.status(400).json({ error: e.message }); }
+  const now = Date.now();
+  await q(`INSERT INTO map_states (country_code,color,status,label,borders_geojson,updated_by,updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)
+           ON CONFLICT (country_code) DO UPDATE SET color=EXCLUDED.color,status=EXCLUDED.status,
+             label=EXCLUDED.label,borders_geojson=EXCLUDED.borders_geojson,
+             updated_by=EXCLUDED.updated_by,updated_at=EXCLUDED.updated_at`,
+    [s.country_code, s.color, s.status, s.label, s.borders_geojson, req.user.id, now]);
+  res.json({ ok: true });
+}));
+app.delete('/api/map-states/:code', ah(auth), requireDeveloper, ah(async (req, res) => {
+  await q('DELETE FROM map_states WHERE country_code=$1', [req.params.code]);
+  res.json({ ok: true });
 }));
 
 // ---------- رفع صورة ----------

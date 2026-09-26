@@ -485,14 +485,20 @@ async function vNews() {
         </div>
       </div>
       <div id="clockbox"></div>
+      <div class="war-sec"><div class="war-sec-t">إعلانات المطورين — حالات الحرب والطوارئ</div><div id="wdecl"><div class="spin"></div></div></div>
+      <div id="mapeditor"></div>
       <div class="war-sec"><div class="war-sec-t">شدة الصراع — نافذة 30 يومًا</div><div id="wtable"><div class="spin"></div></div></div>
       <div class="war-sec"><div class="war-sec-t">الموجز اليومي</div><div id="wbriefs"><div class="spin"></div></div></div>`;
-  let rows = [];
+  let rows = [], mstates = [];
   try { const d = await api('GET', '/conflict'); rows = d.rows || []; }
   catch (e) { /* يبقى فارغًا */ }
-  initGlobe(rows);
-  renderWarTable(rows);
+  try { const m = await api('GET', '/api/map-states'); mstates = m.states || []; }
+  catch (e) { /* يبقى فارغًا */ }
+  initGlobe(rows, mstates);
+  renderWarTable(rows, mstates);
   renderBriefs(rows);
+  renderDeclarations(mstates);
+  if (me && me.role === 'developer') renderMapEditor(mstates);
   mountClock(document.getElementById('clockbox'));
 }
 let THREE_PROMISE = null;
@@ -564,12 +570,33 @@ function buildBorderLines(data, pick, radius, color, opacity) {
   bg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   return new THREE.LineSegments(bg, new THREE.LineBasicMaterial({ color, transparent: true, opacity }));
 }
-function initGlobe(rows) {
+// رسم حدود مخصصة من GeoJSON (Polygon/MultiPolygon) يزوّدها المطورون
+function buildCustomLines(geom, radius, color, opacity) {
+  const pos = [];
+  const seg = (a, b) => { pos.push(a.x, a.y, a.z, b.x, b.y, b.z); };
+  const ring = (pts) => {
+    let prev = null;
+    for (const [lon, lat] of pts) {
+      const p = latLonToVec3(lat, lon, radius);
+      if (prev) seg(prev, p);
+      prev = p;
+    }
+    if (prev && pts.length > 1) seg(prev, latLonToVec3(pts[0][1], pts[0][0], radius));
+  };
+  if (geom) {
+    if (geom.type === 'Polygon') geom.coordinates.forEach(ring);
+    else if (geom.type === 'MultiPolygon') geom.coordinates.forEach((poly) => poly.forEach(ring));
+  }
+  const bg = new THREE.BufferGeometry();
+  bg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  return new THREE.LineSegments(bg, new THREE.LineBasicMaterial({ color, transparent: true, opacity }));
+}
+function initGlobe(rows, mstates) {
   const cv = document.getElementById('wglobe'); if (!cv) return;
-  loadThree(() => { try { initGlobe3D(cv, rows); } catch (e) { initGlobeFallback(cv, rows); } },
+  loadThree(() => { try { initGlobe3D(cv, rows, mstates); } catch (e) { initGlobeFallback(cv, rows); } },
             () => initGlobeFallback(cv, rows));
 }
-function initGlobe3D(cv, rows) {
+function initGlobe3D(cv, rows, mstates) {
   const holder = cv.parentElement;
   const renderer = new THREE.WebGLRenderer({ canvas: cv, alpha: true, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -607,20 +634,47 @@ function initGlobe3D(cv, rows) {
   starGeo.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
   scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0x8aa8c8, size: 0.09, transparent: true, opacity: 0.75 })));
   // حدود سنة 1900: كل كيان بخط خافت، وحدود كل دولة قابلة للعب ملوّنة حسب حالتها
+  // (تعديلات المطورين: لون مخصص وحدود مرسومة تتفوق على التلقائي)
   const CODE_OF = {};
   Object.entries(GEO_NAME_OF).forEach(([c, n]) => { CODE_OF[n] = c; });
-  const BSEVC = { RED: 0xf4212e, ORANGE: 0xff9f0a, YELLOW: 0xffd400 };
   const sevByCode = {};
   rows.forEach((r) => { sevByCode[r.code] = r.severity; });
+  const ovByCode = {};
+  (mstates || []).forEach((s) => { ovByCode[s.country_code] = s; });
+  const SEV_HEX = { RED: '#f4212e', ORANGE: '#ff9f0a', YELLOW: '#ffd400' };
+  const finalColor = (code) => {
+    const ov = ovByCode[code];
+    if (ov && ov.color) return ov.color;
+    return SEV_HEX[sevByCode[code]] || null;
+  };
   loadBorders1900().then((data) => {
     if (!document.body.contains(cv)) return;
     globe.add(buildBorderLines(data, (nm, isP) => !isP, 1.002, 0x5f7285, 0.45));
-    ['RED', 'ORANGE', 'YELLOW'].forEach((s) => {
+    const skipNames = new Set();
+    (mstates || []).forEach((s) => {
+      const nm = GEO_NAME_OF[s.country_code];
+      if (nm && s.borders_geojson) skipNames.add(nm);
+    });
+    const byColor = {};
+    Object.keys(GEO_NAME_OF).forEach((code) => {
+      const col = finalColor(code); if (!col) return;
+      (byColor[col] = byColor[col] || []).push(GEO_NAME_OF[code]);
+    });
+    Object.entries(byColor).forEach(([col, names]) => {
+      const set = new Set(names);
       globe.add(buildBorderLines(data,
-        (nm, isP) => isP && sevByCode[CODE_OF[nm]] === s, 1.004, BSEVC[s], 0.95));
+        (nm, isP) => isP && set.has(nm) && !skipNames.has(nm), 1.004, parseInt(col.slice(1), 16), 0.95));
     });
     globe.add(buildBorderLines(data,
-      (nm, isP) => isP && !sevByCode[CODE_OF[nm]], 1.004, 0x8a97a5, 0.55));
+      (nm, isP) => isP && !skipNames.has(nm) && !finalColor(CODE_OF[nm]), 1.004, 0x8a97a5, 0.55));
+    // حدود مرسومة يدويًا من المطورين
+    (mstates || []).forEach((s) => {
+      if (!s.borders_geojson) return;
+      try {
+        const col = finalColor(s.country_code) || '#8a97a5';
+        globe.add(buildCustomLines(JSON.parse(s.borders_geojson), 1.004, parseInt(col.slice(1), 16), 0.95));
+      } catch (e) {}
+    });
   }).catch(() => {});
   // علامات الدول المشتعلة
   const SEVC = { RED: 0xf4212e, ORANGE: 0xff9f0a, YELLOW: 0xffd400 };
@@ -638,11 +692,24 @@ function initGlobe3D(cv, rows) {
     globe.add(halo); globe.add(core);
     markers.push({ halo, phase: Math.random() * 6.28 });
   });
+  // علامات إعلانات المطورين: حالة حرب / طوارئ (حتى للدول الهادئة)
+  (mstates || []).forEach((s) => {
+    if ((s.status === 'war' || s.status === 'emergency') && s.lat != null && s.lon != null) {
+      const col = s.status === 'war' ? 0xf4212e : 0xff9f0a;
+      const ring = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: col, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.95 }));
+      ring.position.copy(latLonToVec3(s.lat, s.lon, 1.006));
+      ring.scale.setScalar(0.42);
+      globe.add(ring);
+      markers.push({ halo: ring, phase: Math.random() * 6.28 });
+    }
+  });
+  // مراجع لأدوات الرسم (وضع تحرير المطورين)
+  cv._globe = { globe, camera, renderer, scene };
   // ابدأ موجهًا نحو الشرق الأوسط/أوروبا
   globe.rotation.y = -2.094; globe.rotation.x = 0.18;
   let dragging = false, px = 0, py = 0, autoV = 0.0016;
   cv.style.touchAction = 'pan-y';
-  cv.addEventListener('pointerdown', (e) => { dragging = true; px = e.clientX; py = e.clientY; });
+  cv.addEventListener('pointerdown', (e) => { if (cv._drawing) return; dragging = true; px = e.clientX; py = e.clientY; });
   window.addEventListener('pointermove', (e) => {
     if (!dragging) return;
     globe.rotation.y += (e.clientX - px) * 0.006;
@@ -730,16 +797,19 @@ function initGlobeFallback(cv, rows) {
     requestAnimationFrame(draw);
   })();
 }
-function renderWarTable(rows) {
+function renderWarTable(rows, mstates) {
   const el = document.getElementById('wtable'); if (!el) return;
   if (!rows.length) {
     el.innerHTML = '<div class="empty"><span class="e-ic">' + ICONS.flame + '</span>لا توجد تقارير بعد — كن أول من يشعل مسرح العمليات.</div>';
     return;
   }
+  const stByCode = {};
+  (mstates || []).forEach((s) => { if (s.status) stByCode[s.country_code] = s.status; });
+  const ST_AR = { war: 'حالة حرب', emergency: 'حالة طوارئ', peace: 'سلم' };
   el.innerHTML = `<div class="war-table">` + rows.map((r) => `
     <div class="war-row sev-${r.severity}">
       <span class="war-flag">${r.flag}</span>
-      <span class="war-name">${esc(r.name)}</span>
+      <span class="war-name">${esc(r.name)}${stByCode[r.code] ? ` <span class="st-badge st-${stByCode[r.code]}">${ST_AR[stByCode[r.code]]}</span>` : ''}</span>
       <span class="war-sev">${SEV_AR[r.severity]}</span>
       <span class="war-num"><b>${r.war}</b><i>تقارير حرب</i></span>
       <span class="war-num"><b>${r.mentions}</b><i>كل الإشارات</i></span>
@@ -762,6 +832,155 @@ function renderBriefs(rows) {
       ${r.user ? `<a class="war-more" href="#/u/${encodeURIComponent(r.user)}">ملف الدولة ←</a>`
                : `<a class="war-more" href="#/cat/war">تقارير الحرب ←</a>`}
     </article>`).join('');
+}
+
+// ---------- إعلانات المطورين: حالات الحرب والطوارئ ----------
+const MAP_ST_AR = { war: 'حالة حرب', emergency: 'حالة طوارئ', peace: 'سلم معلن' };
+function renderDeclarations(mstates) {
+  const el = document.getElementById('wdecl'); if (!el) return;
+  const order = { war: 0, emergency: 1, peace: 2 };
+  const list = (mstates || []).filter((s) => s.status).sort((a, b) => order[a.status] - order[b.status]);
+  if (!list.length) { el.innerHTML = '<div class="empty">لا توجد إعلانات حالية.</div>'; return; }
+  el.innerHTML = '<div class="wdecl-list">' + list.map((s) => {
+    const c = countryOf(s.country_code);
+    return `<div class="wdecl"><span class="war-flag">${c.flag}</span>
+      <div class="wdecl-tx"><b>${esc(c.name)}</b>${s.label ? `<span> — ${esc(s.label)}</span>` : ''}
+      <time>${s.updated_at ? new Date(s.updated_at).toLocaleDateString('ar-EG') : ''}</time></div>
+      <span class="st-badge st-${s.status}">${MAP_ST_AR[s.status]}</span></div>`;
+  }).join('') + '</div>';
+}
+
+// ---------- محرر الخريطة (حساب المطورين فقط) ----------
+function renderMapEditor(mstates) {
+  window._mstates = mstates || [];
+  const el = document.getElementById('mapeditor'); if (!el) return;
+  el.innerHTML = `<div class="war-sec dev-sec"><div class="war-sec-t">${ICONS.shield} تحرير الخريطة — المطورون فقط</div>
+   <div class="map-ed">
+    <div class="field"><label>الدولة</label><select id="me-country" onchange="mapLoadCountry()">
+      ${COUNTRIES.map((c) => `<option value="${c.code}">${c.flag} ${c.name}</option>`).join('')}</select></div>
+    <div class="field"><label>لون الحدود</label><div class="me-colorrow"><input type="color" id="me-color" value="#f4212e">
+      <label class="chk"><input type="checkbox" id="me-usecolor"> تخصيص اللون</label></div>
+      <p class="hint">بدون تخصيص: لون الحدود حسب شدة الصراع تلقائيًا.</p></div>
+    <div class="field"><label>الحالة المعلنة</label><select id="me-status">
+      <option value="">بدون إعلان</option><option value="war">حالة حرب</option>
+      <option value="emergency">حالة طوارئ</option><option value="peace">سلم</option></select></div>
+    <div class="field"><label>عنوان الإعلان (اختياري)</label><input id="me-label" placeholder="مثال: الحرب العظمى"></div>
+    <div class="me-btns">
+      <button class="btn" onclick="mapSave()">${ICONS.checkSm} حفظ التعديل</button>
+      <button class="btn ghost" onclick="mapDraw()">${ICONS.pen} رسم الحدود على الكرة</button>
+      <button class="btn ghost" onclick="mapEditGeo()">${ICONS.doc} تحرير الإحداثيات</button>
+      <button class="btn danger" onclick="mapDelete()">${ICONS.trash} حذف التعديل</button>
+    </div>
+    <p class="hint" id="me-drawhint" style="display:none">وضع الرسم مفعّل: انقر على الكرة لإضافة نقاط الحدود، ثم اضغط «إنهاء الرسم».</p>
+    <button class="btn" id="me-finishdraw" style="display:none;margin-top:8px" onclick="mapFinishDraw()">إنهاء الرسم</button>
+    <div id="me-geo" style="display:none;margin-top:10px"><div class="field"><label>GeoJSON للحدود (Polygon / MultiPolygon)</label>
+      <textarea id="me-geotext" rows="5" dir="ltr" placeholder='{"type":"Polygon","coordinates":[[[lon,lat],...]]}'></textarea></div>
+      <p class="hint">الإحداثيات بصيغة [خط الطول، خط العرض]. اتركه فارغًا لاستخدام حدود 1900 الأصلية.</p></div>
+   </div></div>`;
+  mapLoadCountry();
+}
+function mapLoadCountry() {
+  const code = val('me-country');
+  const s = (window._mstates || []).find((x) => x.country_code === code);
+  document.getElementById('me-usecolor').checked = !!(s && s.color);
+  document.getElementById('me-color').value = (s && s.color) || '#f4212e';
+  document.getElementById('me-status').value = (s && s.status) || '';
+  document.getElementById('me-label').value = (s && s.label) || '';
+  const gt = document.getElementById('me-geotext');
+  gt.value = (s && s.borders_geojson) || '';
+  document.getElementById('me-geo').style.display = gt.value ? 'block' : 'none';
+}
+async function mapSave() {
+  const body = {
+    country_code: val('me-country'),
+    color: document.getElementById('me-usecolor').checked ? document.getElementById('me-color').value : null,
+    status: val('me-status') || null,
+    label: val('me-label') || null,
+    borders_geojson: val('me-geotext') || null,
+  };
+  try { await api('POST', '/api/map-states', body); alert('حُفظ تعديل الخريطة ✓'); vNews(); }
+  catch (e) { alert(e.message); }
+}
+async function mapDelete() {
+  const code = val('me-country');
+  if (!confirm('حذف كل تعديلات هذه الدولة من الخريطة؟')) return;
+  try { await api('DELETE', '/api/map-states/' + code); vNews(); }
+  catch (e) { alert(e.message); }
+}
+async function mapEditGeo() {
+  const code = val('me-country');
+  try {
+    const data = await loadBorders1900();
+    const nm = GEO_NAME_OF[code];
+    const f = data.features.find((x) => x.properties && x.properties.NAME === nm);
+    if (!f) { alert('لا توجد حدود مسجلة لهذه الدولة في ملف 1900'); return; }
+    const rr = (o) => Array.isArray(o) ? o.map(rr) : (typeof o === 'number' ? Math.round(o * 1000) / 1000 : o);
+    const g = JSON.parse(JSON.stringify(f.geometry));
+    g.coordinates = rr(g.coordinates);
+    document.getElementById('me-geotext').value = JSON.stringify(g);
+    document.getElementById('me-geo').style.display = 'block';
+  } catch (e) { alert('تعذّر تحميل الحدود'); }
+}
+// --- رسم الحدود بالنقر على الكرة ---
+let drawPts = [], drawLine = null, drawMarks = [], drawG = null;
+function mapClearDrawObjs() {
+  if (drawLine && drawG) { drawG.globe.remove(drawLine); drawLine = null; }
+  if (drawG) drawMarks.forEach((m) => drawG.globe.remove(m));
+  drawMarks = [];
+}
+function mapStopDraw() {
+  const cv = document.getElementById('wglobe');
+  if (cv) {
+    cv._drawing = false; cv.style.cursor = '';
+    if (cv._drawHandler) cv.removeEventListener('pointerdown', cv._drawHandler);
+    const h = document.getElementById('me-drawhint'); if (h) h.style.display = 'none';
+    const fb = document.getElementById('me-finishdraw'); if (fb) fb.style.display = 'none';
+  }
+}
+function mapDraw() {
+  const cv = document.getElementById('wglobe');
+  const G = cv && cv._globe;
+  if (!G || !window.THREE) { alert('الكرة ثلاثية الأبعاد غير جاهزة — حدّث الصفحة وحاول مجددًا'); return; }
+  mapClearDrawObjs();
+  drawPts = []; drawG = G;
+  cv._drawing = true; cv.style.cursor = 'crosshair';
+  document.getElementById('me-drawhint').style.display = 'block';
+  document.getElementById('me-finishdraw').style.display = 'block';
+  const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
+  cv._drawHandler = (e) => {
+    const r = cv.getBoundingClientRect();
+    ptr.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+    ptr.y = -((e.clientY - r.top) / r.height) * 2 + 1;
+    ray.setFromCamera(ptr, G.camera);
+    const hits = ray.intersectObject(G.globe.children[0]);
+    if (!hits.length) return;
+    const v = G.globe.worldToLocal(hits[0].point.clone()).normalize();
+    const lat = Math.asin(Math.max(-1, Math.min(1, v.y))) * 180 / Math.PI;
+    const lon = Math.atan2(-v.z, v.x) * 180 / Math.PI;
+    drawPts.push([Math.round(lon * 1000) / 1000, Math.round(lat * 1000) / 1000]);
+    mapClearDrawObjs();
+    const pts = drawPts.map(([lo, la]) => latLonToVec3(la, lo, 1.006));
+    if (pts.length > 1) {
+      drawLine = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(pts),
+        new THREE.LineBasicMaterial({ color: 0x2aff5e }));
+      G.globe.add(drawLine);
+    }
+    const mkGeo = new THREE.SphereGeometry(0.008, 8, 8);
+    const mkMat = new THREE.MeshBasicMaterial({ color: 0x2aff5e });
+    drawMarks = pts.map((p) => { const m = new THREE.Mesh(mkGeo, mkMat); m.position.copy(p); G.globe.add(m); return m; });
+  };
+  cv.addEventListener('pointerdown', cv._drawHandler);
+}
+function mapFinishDraw() {
+  if (drawPts.length < 3) { alert('ارسم 3 نقاط على الأقل'); return; }
+  const ring = drawPts.slice();
+  ring.push(ring[0].slice());
+  document.getElementById('me-geotext').value = JSON.stringify({ type: 'Polygon', coordinates: [ring] });
+  document.getElementById('me-geo').style.display = 'block';
+  mapClearDrawObjs();
+  mapStopDraw();
+  alert('اكتمل الرسم — راجع الإحداثيات ثم اضغط «حفظ التعديل»');
 }
 
 // ---------- مقال ----------
