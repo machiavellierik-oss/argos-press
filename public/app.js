@@ -425,6 +425,51 @@ function makeGlowTexture() {
   x.fillStyle = g; x.fillRect(0, 0, 64, 64);
   return new THREE.CanvasTexture(c);
 }
+// أسماء الدول في ملف حدود 1900 مقابل رموز اللعبة
+const GEO_NAME_OF = {
+  GB: 'United Kingdom of Great Britain and Ireland', FR: 'France', DE: 'Germany',
+  AT: 'Austria Hungary', RU: 'Russian Empire', OT: 'Ottoman Empire', IT: 'Italy',
+  ES: 'Spain', PT: 'Portugal', NL: 'Netherlands', BE: 'Belgium', CH: 'Switzerland',
+  SN: 'Sweden–Norway', DK: 'Denmark', GR: 'Greece', RS: 'Serbia', RO: 'Romania',
+  BG: 'Bulgaria', ME: 'Montenegro', LU: 'Luxembourg', JP: 'Imperial Japan',
+  CN: 'Manchu Empire', IR: 'Persia', TH: 'Rattanakosin Kingdom', AF: 'Afghanistan',
+  KR: 'Korea', NP: 'Nepal', ET: 'Ethiopia', LR: 'Liberia', MA: 'Morocco',
+  TV: 'Transvaal', OF: 'Orange Free State', US: 'United States of America',
+  MX: 'Mexico', GT: 'Guatemala', HN: 'Honduras', SV: 'El Salvador',
+  NI: 'Nicaragua', CR: 'Costa Rica', CO: 'Colombia', VE: 'Venezuela',
+  EC: 'Ecuador', PE: 'Peru', BO: 'Bolivia', CL: 'Chile', AR: 'Argentina',
+  UY: 'Uruguay', PY: 'Paraguay', BR: 'Kingdom of Brazil', HT: 'Haiti',
+  DO: 'Dominican Republic', OM: 'Oman', HS: 'Jabal Shammar',
+};
+let BORDERS_PROMISE = null;
+function loadBorders1900() {
+  if (!BORDERS_PROMISE) BORDERS_PROMISE = fetch('/borders-1900.geojson').then((r) => { if (!r.ok) throw 0; return r.json(); });
+  return BORDERS_PROMISE;
+}
+function buildBorderLines(data, onlyPlayable, radius, color, opacity) {
+  const names = new Set(Object.values(GEO_NAME_OF));
+  const pos = [];
+  const seg = (a, b) => { pos.push(a.x, a.y, a.z, b.x, b.y, b.z); };
+  const ring = (pts) => {
+    let prev = null;
+    for (const [lon, lat] of pts) {
+      const p = latLonToVec3(lat, lon, radius);
+      if (prev) seg(prev, p);
+      prev = p;
+    }
+  };
+  for (const f of data.features) {
+    const nm = f.properties && f.properties.NAME;
+    const isP = names.has(nm);
+    if (onlyPlayable ? !isP : isP) continue;
+    const g = f.geometry; if (!g) continue;
+    if (g.type === 'Polygon') g.coordinates.forEach(ring);
+    else if (g.type === 'MultiPolygon') g.coordinates.forEach((poly) => poly.forEach(ring));
+  }
+  const bg = new THREE.BufferGeometry();
+  bg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  return new THREE.LineSegments(bg, new THREE.LineBasicMaterial({ color, transparent: true, opacity }));
+}
 function initGlobe(rows) {
   const cv = document.getElementById('wglobe'); if (!cv) return;
   loadThree(() => { try { initGlobe3D(cv, rows); } catch (e) { initGlobeFallback(cv, rows); } },
@@ -467,6 +512,12 @@ function initGlobe3D(cv, rows) {
   const starGeo = new THREE.BufferGeometry();
   starGeo.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
   scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0x8aa8c8, size: 0.09, transparent: true, opacity: 0.75 })));
+  // حدود سنة 1900: كل الكيانات بخط خافت، والدول القابلة للعب بخط ذهبي
+  loadBorders1900().then((data) => {
+    if (!document.body.contains(cv)) return;
+    globe.add(buildBorderLines(data, false, 1.002, 0x5f7285, 0.5));
+    globe.add(buildBorderLines(data, true, 1.004, 0xffd400, 0.9));
+  }).catch(() => {});
   // علامات الدول المشتعلة
   const SEVC = { RED: 0xf4212e, ORANGE: 0xff9f0a, YELLOW: 0xffd400 };
   const glowTex = makeGlowTexture();

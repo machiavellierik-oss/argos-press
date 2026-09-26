@@ -8,6 +8,7 @@ const STATIC = [
   '/manifest.json',
   '/logo.jpg',
   '/textures/earth-night.jpg',
+  '/borders-1900.geojson',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/icons/maskable-512.png',
