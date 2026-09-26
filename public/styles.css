@@ -471,3 +471,12 @@ button{font-family:inherit;cursor:pointer}
   .war-hero-tx{max-width:none;padding:16px}
   .war-hero-tx h2{font-size:22px}
 }
+
+/* ---------- بانر غرفة الحرب في الرئيسية ---------- */
+.war-banner{display:flex;align-items:center;gap:12px;margin:12px 16px;padding:12px 16px;border:1px solid rgba(244,33,46,.4);border-radius:14px;background:linear-gradient(135deg,rgba(244,33,46,.12),rgba(29,155,240,.08));text-decoration:none;color:var(--text)}
+.war-banner:hover{border-color:rgba(244,33,46,.7)}
+.wb-ic{font-size:26px}
+.wb-tx{display:flex;flex-direction:column}
+.wb-tx b{font-size:15px}
+.wb-tx i{font-style:normal;font-size:12px;color:var(--muted)}
+.wb-go{margin-inline-start:auto;font-size:18px;color:var(--red);font-weight:800}

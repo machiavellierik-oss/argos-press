@@ -129,7 +129,8 @@ function renderNav(active) {
   nav.innerHTML = [...NAV, dashLink].map(([h, t, ic]) =>
     `<a class="nav-link${h === active ? ' active' : ''}" href="${h}">${ICONS[ic]}<span>${t}</span></a>`).join('');
   const bn = document.getElementById('bottomnav');
-  bn.innerHTML = [...NAV.slice(0, 3), dashLink].map(([h, , ic]) =>
+  const newsLink = NAV.find((n) => n[0] === '#/news');
+  bn.innerHTML = [NAV[0], newsLink, NAV[1], NAV[2], dashLink].map(([h, , ic]) =>
     `<a class="${h === active ? 'active' : ''}" href="${h}">${ICONS[ic]}</a>`).join('');
   if (me) {
     api('GET', '/conversations').then((list) => {
@@ -321,7 +322,9 @@ function bindComposer(after) {
 async function vHome() {
   app.innerHTML = thead('الرئيسية',
     `<button class="ttab active" data-ht="d">البرقيات</button><button class="ttab" data-ht="a">المقالات</button>`) +
-    `<div id="sbar"></div>` + composerHTML() + `<div id="feed"><div class="spin"></div></div>`;
+    `<div id="sbar"></div>` + composerHTML()
+    + `<a class="war-banner" href="#/news"><span class="wb-ic">🌍</span><span class="wb-tx"><b>غرفة الحرب</b><i>خريطة الصراع المباشرة وشدة النزاعات</i></span><span class="wb-go">←</span></a>`
+    + `<div id="feed"><div class="spin"></div></div>`;
   bindComposer(() => route());
   document.getElementById('sbar').innerHTML = await storyBarHTML();
   bindStories();
