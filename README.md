@@ -16,11 +16,20 @@ npm start
 ```
 ثم افتح: http://localhost:3000
 
-## النشر على الإنترنت
-المشروع يحتاج سيرفر Node.js (لا يعمل على GitHub Pages لأنها للمواقع الثابتة فقط). خيارات مجانية:
-- **Render**: أنشئ Web Service جديد من هذا المستودع، أمر التشغيل `npm start`
-- **Railway / VPS**: نفس الأمر، مع متغير البيئة `PORT` حسب الحاجة
+> يتطلب التشغيل متغيرات البيئة أدناه (قاعدة البيانات والصور على Supabase — دائمة ولا تُمسح مع النشر).
 
-متغيرات البيئة الاختيارية:
+## الإعداد: Supabase (قاعدة بيانات + تخزين صور) — مجاني ودائم
+1. أنشئ حسابًا على https://supabase.com ثم مشروعًا جديدًا (Free).
+2. من **Project Settings → Database**: انسخ **Connection string** (وضع Session — المنفذ 5432) ← هذا هو `DATABASE_URL`.
+3. من **Project Settings → API**: انسخ **Project URL** ← `SUPABASE_URL`، و **service_role key** (سري!) ← `SUPABASE_SERVICE_KEY`.
+4. من **Storage**: أنشئ Bucket جديدًا باسم `uploads` واجعله **Public**.
+
+## النشر على Render
+المشروع يحتاج سيرفر Node.js (لا يعمل على GitHub Pages). بعد إنشاء الـ Web Service:
+1. افتح **Environment** وأضف المتغيرات الثلاثة: `DATABASE_URL` / `SUPABASE_URL` / `SUPABASE_SERVICE_KEY`.
+2. **Manual Deploy** ← **Deploy latest commit**.
+
+متغيرات البيئة:
 - `PORT` — المنفذ (افتراضي 3000)
-- `DB_PATH` — مسار قاعدة البيانات (افتراضي `argos.db` بجانب المشروع)
+- `DATABASE_URL` — رابط PostgreSQL (إجباري)
+- `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` — لرفع الصور (إجباري)
