@@ -388,6 +388,7 @@ async function vNews() {
             <span><i class="dot" style="background:#f4212e"></i>مرتفع</span>
             <span><i class="dot" style="background:#ff9f0a"></i>متوسط</span>
             <span><i class="dot" style="background:#ffd400"></i>منخفض</span>
+            <span class="hint">لون حدود كل دولة = حالتها</span>
           </div>
         </div>
       </div>
@@ -446,7 +447,7 @@ function loadBorders1900() {
   if (!BORDERS_PROMISE) BORDERS_PROMISE = fetch('/borders-1900.geojson').then((r) => { if (!r.ok) throw 0; return r.json(); });
   return BORDERS_PROMISE;
 }
-function buildBorderLines(data, onlyPlayable, radius, color, opacity) {
+function buildBorderLines(data, pick, radius, color, opacity) {
   const names = new Set(Object.values(GEO_NAME_OF));
   const pos = [];
   const seg = (a, b) => { pos.push(a.x, a.y, a.z, b.x, b.y, b.z); };
@@ -460,8 +461,7 @@ function buildBorderLines(data, onlyPlayable, radius, color, opacity) {
   };
   for (const f of data.features) {
     const nm = f.properties && f.properties.NAME;
-    const isP = names.has(nm);
-    if (onlyPlayable ? !isP : isP) continue;
+    if (!pick(nm, names.has(nm))) continue;
     const g = f.geometry; if (!g) continue;
     if (g.type === 'Polygon') g.coordinates.forEach(ring);
     else if (g.type === 'MultiPolygon') g.coordinates.forEach((poly) => poly.forEach(ring));
@@ -512,11 +512,21 @@ function initGlobe3D(cv, rows) {
   const starGeo = new THREE.BufferGeometry();
   starGeo.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
   scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0x8aa8c8, size: 0.09, transparent: true, opacity: 0.75 })));
-  // حدود سنة 1900: كل الكيانات بخط خافت، والدول القابلة للعب بخط ذهبي
+  // حدود سنة 1900: كل كيان بخط خافت، وحدود كل دولة قابلة للعب ملوّنة حسب حالتها
+  const CODE_OF = {};
+  Object.entries(GEO_NAME_OF).forEach(([c, n]) => { CODE_OF[n] = c; });
+  const BSEVC = { RED: 0xf4212e, ORANGE: 0xff9f0a, YELLOW: 0xffd400 };
+  const sevByCode = {};
+  rows.forEach((r) => { sevByCode[r.code] = r.severity; });
   loadBorders1900().then((data) => {
     if (!document.body.contains(cv)) return;
-    globe.add(buildBorderLines(data, false, 1.002, 0x5f7285, 0.5));
-    globe.add(buildBorderLines(data, true, 1.004, 0xffd400, 0.9));
+    globe.add(buildBorderLines(data, (nm, isP) => !isP, 1.002, 0x5f7285, 0.45));
+    ['RED', 'ORANGE', 'YELLOW'].forEach((s) => {
+      globe.add(buildBorderLines(data,
+        (nm, isP) => isP && sevByCode[CODE_OF[nm]] === s, 1.004, BSEVC[s], 0.95));
+    });
+    globe.add(buildBorderLines(data,
+      (nm, isP) => isP && !sevByCode[CODE_OF[nm]], 1.004, 0x8a97a5, 0.55));
   }).catch(() => {});
   // علامات الدول المشتعلة
   const SEVC = { RED: 0xf4212e, ORANGE: 0xff9f0a, YELLOW: 0xffd400 };
@@ -815,6 +825,7 @@ async function doRegister() {
 async function vDash() {
   if (!me) { location.hash = '#/login'; return; }
   const c = countryOf(me.country_code);
+  const staff = me.role === 'admin' || me.role === 'system';
   const [arts, disps] = await Promise.all([
     api('GET', '/articles?limit=100').catch(() => []), api('GET', '/dispatches?limit=100').catch(() => []),
   ]);
@@ -837,15 +848,17 @@ async function vDash() {
       </div>
       <p class="p-bio">${me.bio ? esc(me.bio) : `${c.flag} الحساب الرسمي لدولة ${esc(c.name)} في محاكاة أرجوس للتاريخ — 1900.`}</p>
       <div class="p-meta"><span>📍 ${esc(c.name)}</span><span>🗓️ انضم ${timeAgo(me.created_at || Date.now())}</span>
-        ${me.role === 'admin' ? '<span>⭐ إدارة المقر</span>' : ''}</div>
+        ${staff ? '<span>⭐ إدارة المقر</span>' : ''}</div>
       <div class="p-meta"><span><b>${mine_d}</b> برقية</span><span><b>${mine_a}</b> مقال</span></div>
     </div>
     <div class="ptabs">
       <button class="ptab active" data-pt="feed">منشوراتي</button>
       <button class="ptab" data-pt="new-d">برقية جديدة</button>
-      <button class="ptab" data-pt="new-a">مقال جديد</button>
+      ${staff ? '<button class="ptab" data-pt="new-a">مقال جديد</button>' : ''}
       <button class="ptab" data-pt="edit">تعديل البروفايل</button>
       <button class="ptab" data-pt="dossier">ملفي الاستخباراتي</button>
+      ${staff ? '<button class="ptab" data-pt="switch">🔄 تبديل الحسابات</button>' : ''}
+      ${staff ? '<button class="ptab" data-pt="admin">🛡️ إدارة المنصة</button>' : ''}
     </div>
     <div id="pbody"></div>`;
   const tabs = app.querySelectorAll('[data-pt]');
@@ -878,7 +891,9 @@ async function dashTab(t) {
       <div class="field"><label class="filebtn">${ICONS.img} إرفاق صورة (اختياري)<input id="dimg" type="file" accept="image/*" style="display:none"></label></div>
       <button class="btn" style="width:auto;padding:12px 44px" onclick="sendDispatch()">نشر البرقية</button></div>`;
   } else if (t === 'new-a') {
-    const cats = Object.entries(CATS).filter(([k]) => k !== 'official' || me.role === 'admin');
+    const staff = me.role === 'admin' || me.role === 'system';
+    if (!staff) { body.innerHTML = '<div class="form-dark"><div class="err">نشر المقالات حصرًا عبر حساب argos HQ.</div></div>'; return; }
+    const cats = Object.entries(CATS);
     body.innerHTML = `<div class="form-dark"><h2>مقال جديد</h2><div id="msg"></div>
       <div class="field"><label>القسم</label><select id="acat">${cats.map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
       <div class="field"><label>العنوان</label><input id="atitle"></div>
@@ -913,6 +928,10 @@ async function dashTab(t) {
       document.getElementById('pavatarurl').value = '';
       document.getElementById('pavprev').innerHTML = avHTML({ country_code: me.country_code }, 64);
     };
+  } else if (t === 'switch') {
+    renderSwitchTab(body);
+  } else if (t === 'admin') {
+    renderAdminTab(body);
   } else {
     body.innerHTML = '<div class="spin"></div>';
     await vDashDossier(body);
@@ -940,6 +959,86 @@ async function sendArticle() {
 async function delDispatch(id) {
   if (!confirm('حذف هذه البرقية؟')) return;
   await api('DELETE', `/dispatches/${id}`); dashTab('feed');
+}
+// ---------- تبديل الحسابات (إدارة المقر) ----------
+function getSavedAccounts() {
+  try { return JSON.parse(localStorage.getItem('argos_switch') || '[]'); } catch { return []; }
+}
+function saveAccounts(list) { localStorage.setItem('argos_switch', JSON.stringify(list)); }
+function renderSwitchTab(body) {
+  const list = getSavedAccounts();
+  body.innerHTML = `<div class="form-dark"><h2>🔄 تبديل الحسابات</h2>
+    <p class="hint">احفظ حساباتك هنا وانتقل بينها بضغطة واحدة.</p>
+    <div>` + (list.length ? list.map((a, i) => `
+      <div class="row-item"><span class="grow">👤 ${esc(a.username)}${a.username === me.username ? ' <b>(الحالي)</b>' : ''}</span>
+      ${a.username === me.username ? '' : `<button class="btn" style="width:auto;padding:8px 18px" onclick="switchToAccount(${i})">دخول</button>`}
+      <button class="btn ghost" style="width:auto;padding:8px 14px" onclick="removeAccount(${i})">✕</button></div>`).join('')
+      : '<p class="hint">لا توجد حسابات محفوظة بعد.</p>') + `</div>
+    <button class="btn" style="width:auto;padding:12px 32px;margin-top:12px" onclick="saveCurrentAccount()">💾 حفظ الحساب الحالي (@${esc(me.username)})</button>
+  </div>`;
+}
+async function saveCurrentAccount() {
+  try {
+    const r = await api('POST', '/account-token');
+    const list = getSavedAccounts().filter((a) => a.username !== r.username);
+    list.push({ username: r.username, token: r.token });
+    saveAccounts(list);
+    dashTab('switch');
+  } catch (e) { msg(e.message, false); }
+}
+function switchToAccount(i) {
+  const a = getSavedAccounts()[i]; if (!a) return;
+  document.cookie = `session=${encodeURIComponent(a.token)}; Path=/; Max-Age=${30 * 24 * 3600}; SameSite=Lax`;
+  location.reload();
+}
+function removeAccount(i) {
+  const list = getSavedAccounts(); list.splice(i, 1); saveAccounts(list); dashTab('switch');
+}
+// ---------- إدارة المنصة (حظر/طرد) ----------
+async function renderAdminTab(body) {
+  body.innerHTML = '<div class="spin"></div>';
+  let users = [];
+  try { users = await api('GET', '/api/admin/users'); }
+  catch (e) { body.innerHTML = `<div class="form-dark"><div class="err">${esc(e.message)}</div></div>`; return; }
+  body.innerHTML = `<div class="form-dark"><h2>🛡️ إدارة المنصة</h2>
+    <div class="sec-h">حساب argos HQ</div>
+    <p class="hint">البريد: <b dir="ltr">hq@argos.internal</b> — عيّن كلمة السر ثم سجّل الدخول به من صفحة الدخول، واحفظه في «تبديل الحسابات».</p>
+    <div id="msg"></div>
+    <div class="field"><label>كلمة سر جديدة لحساب argos HQ</label>
+      <input id="hqpass" type="password" placeholder="6 أحرف على الأقل" autocomplete="new-password"></div>
+    <button class="btn" style="width:auto;padding:10px 32px" onclick="setHqPassword()">تعيين كلمة السر</button>
+    <div class="sec-h" style="margin-top:18px">المستخدمون (${users.length})</div>
+    <div>` + (users.map((u) => {
+      const c = countryOf(u.country_code);
+      return `<div class="row-item"><span class="grow">${c.flag} <b>${esc(u.username)}</b> <span class="hint">${esc(c.name)}${u.role === 'admin' ? ' · ⭐ أدمن' : ''}${u.banned ? ' · ⛔ محظور' : ''}</span></span>
+        ${u.banned
+          ? `<button class="btn" style="width:auto;padding:8px 14px" onclick="unbanUser(${u.id})">إلغاء الحظر</button>`
+          : `<button class="btn danger" style="width:auto;padding:8px 14px" onclick="banUser(${u.id},'${esc(u.username)}')">حظر</button>`}
+        <button class="btn danger" style="width:auto;padding:8px 14px" onclick="kickUser(${u.id},'${esc(u.username)}')">طرد</button>
+      </div>`;
+    }).join('') || '<p class="hint">لا يوجد مستخدمون.</p>') + `</div></div>`;
+}
+async function setHqPassword() {
+  const p = document.getElementById('hqpass').value;
+  try {
+    await api('POST', '/api/admin/hq-password', { password: p });
+    msg('تم تعيين كلمة سر argos HQ ✓', true);
+    document.getElementById('hqpass').value = '';
+  } catch (e) { msg(e.message, false); }
+}
+async function banUser(id, name) {
+  if (!confirm(`حظر ${name} من المنصة؟ سيُطرد من جلساته فورًا.`)) return;
+  try { await api('POST', '/api/admin/ban', { user_id: id }); dashTab('admin'); }
+  catch (e) { alert(e.message); }
+}
+async function unbanUser(id) {
+  try { await api('POST', '/api/admin/unban', { user_id: id }); dashTab('admin'); }
+  catch (e) { alert(e.message); }
+}
+async function kickUser(id, name) {
+  if (!confirm(`طرد ${name} نهائيًا مع حذف كل محتواه؟ لا يمكن التراجع!`)) return;
+  try { await api('DELETE', `/api/admin/users/${id}`); dashTab('admin'); }
+  catch (e) { alert(e.message); }
 }
 async function saveProfile() {
   try {

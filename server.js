@@ -131,6 +131,8 @@ async function initDb() {
   try { await q("ALTER TABLE users ADD COLUMN bio TEXT DEFAULT ''"); } catch (e) { /* موجود مسبقًا */ }
   // الصورة الشخصية
   try { await q("ALTER TABLE users ADD COLUMN avatar TEXT DEFAULT ''"); } catch (e) { /* موجود مسبقًا */ }
+  // الحظر
+  try { await q("ALTER TABLE users ADD COLUMN banned INTEGER DEFAULT 0"); } catch (e) { /* موجود مسبقًا */ }
   // الرسائل الخاصة
   await q(`CREATE TABLE IF NOT EXISTS messages (
     id SERIAL PRIMARY KEY,
@@ -226,13 +228,18 @@ async function auth(req, res, next) {
   const t = getToken(req);
   if (!t) return res.status(401).json({ error: 'يجب تسجيل الدخول أولاً' });
   const row = await one(
-    'SELECT u.id,u.username,u.email,u.country_code,u.role,u.bio,u.avatar FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at>$2',
+    'SELECT u.id,u.username,u.email,u.country_code,u.role,u.bio,u.avatar,u.banned FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at>$2',
     [t, Date.now()]
   );
   if (!row) return res.status(401).json({ error: 'انتهت الجلسة، سجّل الدخول مجددًا' });
+  if (row.banned) return res.status(403).json({ error: 'تم حظر هذا الحساب من المنصة' });
   req.user = row;
   next();
 }
+// طاقم المقر: الأدمن + حساب argos HQ
+const isStaff = (u) => u && (u.role === 'admin' || u.role === 'system');
+const requireStaff = (req, res, next) =>
+  isStaff(req.user) ? next() : res.status(403).json({ error: 'هذه الخاصية لإدارة المقر فقط' });
 const validCountry = (c) => COUNTRIES.some((x) => x.code === c);
 const cleanImage = (v) =>
   (typeof v === 'string' && v.startsWith('https://') && v.length < 600 ? v : null);
@@ -392,8 +399,11 @@ app.post('/api/register', ah(async (req, res) => {
 app.post('/api/login', ah(async (req, res) => {
   const { email, password } = req.body || {};
   const u = await one('SELECT * FROM users WHERE email=$1', [(email || '').toLowerCase()]);
-  if (!u || u.role === 'system' || !bcrypt.compareSync(password || '', u.password_hash))
+  if (!u || !bcrypt.compareSync(password || '', u.password_hash))
     return res.status(401).json({ error: 'بيانات الدخول غير صحيحة' });
+  if (u.role === 'system' && u.username !== 'argos_hq')
+    return res.status(401).json({ error: 'بيانات الدخول غير صحيحة' });
+  if (u.banned) return res.status(403).json({ error: 'هذا الحساب محظور من المنصة' });
   await setSession(res, u.id);
   res.json({ ok: true, role: u.role });
 }));
@@ -408,6 +418,83 @@ app.get('/api/me', ah(async (req, res) => {
     [t, Date.now()]
   );
   res.json({ user: row || null });
+}));
+
+// ---------- إدارة المقر (حظر/طرد/كلمة سر HQ) ----------
+// توكن إضافي لتبديل الحسابات (يُحفظ في المتصفح)
+app.post('/api/account-token', ah(auth), ah(async (req, res) => {
+  if (!isStaff(req.user)) return res.status(403).json({ error: 'تبديل الحسابات متاح لإدارة المقر فقط' });
+  const token = crypto.randomBytes(32).toString('hex');
+  await q('INSERT INTO sessions (token,user_id,expires_at) VALUES ($1,$2,$3)',
+    [token, req.user.id, Date.now() + 30 * 24 * 3600 * 1000]);
+  res.json({ token, username: req.user.username });
+}));
+
+// قائمة المستخدمين للإدارة
+app.get('/api/admin/users', ah(auth), requireStaff, ah(async (req, res) => {
+  const rows = await all(
+    "SELECT id,username,country_code,role,banned,created_at FROM users WHERE role!='system' ORDER BY created_at ASC"
+  );
+  res.json(rows.map((r) => ({
+    id: r.id, username: r.username, country_code: r.country_code,
+    role: r.role, banned: !!r.banned, created_at: Number(r.created_at),
+  })));
+}));
+
+// حظر مستخدم (يطرد جلساته فورًا)
+app.post('/api/admin/ban', ah(auth), requireStaff, ah(async (req, res) => {
+  const { user_id } = req.body || {};
+  const t = await one('SELECT id,username,role FROM users WHERE id=$1', [user_id]);
+  if (!t || t.role === 'system') return res.status(404).json({ error: 'المستخدم غير موجود' });
+  if (t.id === req.user.id) return res.status(400).json({ error: 'لا يمكنك حظر نفسك' });
+  await q('UPDATE users SET banned=1 WHERE id=$1', [t.id]);
+  await q('DELETE FROM sessions WHERE user_id=$1', [t.id]);
+  res.json({ ok: true });
+}));
+
+// إلغاء الحظر
+app.post('/api/admin/unban', ah(auth), requireStaff, ah(async (req, res) => {
+  const { user_id } = req.body || {};
+  await q('UPDATE users SET banned=0 WHERE id=$1', [user_id]);
+  res.json({ ok: true });
+}));
+
+// طرد نهائي: حذف الحساب وكل محتواه
+app.delete('/api/admin/users/:id', ah(auth), requireStaff, ah(async (req, res) => {
+  const t = await one('SELECT id,username,role FROM users WHERE id=$1', [req.params.id]);
+  if (!t || t.role === 'system') return res.status(404).json({ error: 'المستخدم غير موجود' });
+  if (t.id === req.user.id) return res.status(400).json({ error: 'لا يمكنك طرد نفسك' });
+  const uid = t.id;
+  const artIds = (await all('SELECT id FROM articles WHERE user_id=$1', [uid])).map((r) => r.id);
+  const dspIds = (await all('SELECT id FROM dispatches WHERE user_id=$1', [uid])).map((r) => r.id);
+  for (const aid of artIds) {
+    await q("DELETE FROM likes WHERE target_type='article' AND target_id=$1", [aid]);
+    await q("DELETE FROM comments WHERE target_type='article' AND target_id=$1", [aid]);
+  }
+  for (const did of dspIds) {
+    await q("DELETE FROM likes WHERE target_type='dispatch' AND target_id=$1", [did]);
+    await q("DELETE FROM comments WHERE target_type='dispatch' AND target_id=$1", [did]);
+  }
+  await q('DELETE FROM articles WHERE user_id=$1', [uid]);
+  await q('DELETE FROM dispatches WHERE user_id=$1', [uid]);
+  await q('DELETE FROM comments WHERE user_id=$1', [uid]);
+  await q('DELETE FROM likes WHERE user_id=$1', [uid]);
+  await q('DELETE FROM stories WHERE user_id=$1', [uid]);
+  await q('DELETE FROM messages WHERE sender_id=$1 OR receiver_id=$1', [uid]);
+  await q('DELETE FROM dossiers WHERE user_id=$1', [uid]);
+  await q('DELETE FROM sessions WHERE user_id=$1', [uid]);
+  await q('DELETE FROM users WHERE id=$1', [uid]);
+  res.json({ ok: true });
+}));
+
+// تعيين كلمة سر حساب argos HQ
+app.post('/api/admin/hq-password', ah(auth), requireStaff, ah(async (req, res) => {
+  const { password } = req.body || {};
+  if (!password || password.length < 6)
+    return res.status(400).json({ error: 'كلمة المرور 6 أحرف على الأقل' });
+  const hash = bcrypt.hashSync(password, 10);
+  await q("UPDATE users SET password_hash=$1 WHERE username='argos_hq'", [hash]);
+  res.json({ ok: true });
 }));
 
 // ---------- رفع صورة ----------
@@ -460,12 +547,12 @@ app.get('/api/articles/:id', ah(async (req, res) => {
   res.json(articleRow(a));
 }));
 app.post('/api/articles', ah(auth), ah(async (req, res) => {
+  if (!isStaff(req.user))
+    return res.status(403).json({ error: 'نشر السيناريوهات والحروب والأحداث حصرًا عبر حساب argos HQ' });
   const { title, body, category, image } = req.body || {};
   if (!title || title.trim().length < 5) return res.status(400).json({ error: 'العنوان قصير جدًا' });
   if (!body || body.trim().length < 20) return res.status(400).json({ error: 'نص المقال قصير جدًا (20 حرفًا على الأقل)' });
   const cat = CATEGORIES[category] ? category : 'events';
-  if (cat === 'official' && req.user.role !== 'admin')
-    return res.status(403).json({ error: 'البيانات الرسمية تصدر عن إدارة المقر فقط' });
   const r = await one(
     'INSERT INTO articles (user_id,title,body,image,category,created_at) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
     [req.user.id, title.trim(), body.trim(), cleanImage(image), cat, Date.now()]
@@ -475,7 +562,7 @@ app.post('/api/articles', ah(auth), ah(async (req, res) => {
 app.delete('/api/articles/:id', ah(auth), ah(async (req, res) => {
   const a = await one('SELECT user_id FROM articles WHERE id=$1', [req.params.id]);
   if (!a) return res.status(404).json({ error: 'المقال غير موجود' });
-  if (a.user_id !== req.user.id && req.user.role !== 'admin')
+  if (a.user_id !== req.user.id && !isStaff(req.user))
     return res.status(403).json({ error: 'لا تملك صلاحية الحذف' });
   await q('DELETE FROM articles WHERE id=$1', [req.params.id]);
   await q("DELETE FROM likes WHERE target_type='article' AND target_id=$1", [req.params.id]);
