@@ -489,3 +489,4 @@ button{font-family:inherit;cursor:pointer}
 .clock-game{color:#ffd400;font-size:1.15rem}
 .clock-foot{color:var(--muted);font-size:.82rem;margin-top:8px;line-height:1.7}
 .clock-ctl{display:flex;gap:10px;margin-top:12px}
+.clock-ctl .btn{white-space:nowrap}
