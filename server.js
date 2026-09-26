@@ -11,6 +11,16 @@ const multer = require('multer');
 const { DatabaseSync } = require('node:sqlite');
 const { COUNTRIES } = require('./countries');
 
+// مهارات العملاء (مصفوفة المهارات في الملف الاستخباراتي)
+const SKILLS = {
+  intel: 'الاستخبارات والتجسس',
+  diplomacy: 'التفاوض والتحالفات',
+  econwar: 'الحرب الاقتصادية والدبلوماسية',
+  analysis: 'التحليل الجيوسياسي',
+  planning: 'التخطيط طويل المدى وإدارة الأزمات',
+  resources: 'إدارة الموارد وتحليل البيانات',
+};
+
 const PORT = process.env.PORT || 3000;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'argos.db');
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
@@ -57,6 +67,19 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_articles_cat ON articles(category, created_at);
 CREATE INDEX IF NOT EXISTS idx_dispatches_time ON dispatches(created_at);
+CREATE TABLE IF NOT EXISTS dossiers (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  alias TEXT DEFAULT '',
+  status TEXT DEFAULT 'ACTIVE',
+  clearance TEXT DEFAULT 'LEVEL 1',
+  profile TEXT DEFAULT '',
+  avatar TEXT DEFAULT '',
+  theaters TEXT DEFAULT '[]',
+  roles TEXT DEFAULT '[]',
+  achievements TEXT DEFAULT '[]',
+  skills TEXT DEFAULT '{}',
+  updated_at INTEGER
+);
 `);
 
 // مستخدم النظام (مقر أرجوس) + مقال ترحيبي
@@ -150,6 +173,72 @@ app.get('/api/taken-countries', (req, res) => {
   res.json(rows.map((r) => r.country_code));
 });
 
+// ---------- الملفات الاستخباراتية (إنجازات اللاعبين) ----------
+const parseJson = (s, fb) => { try { const v = JSON.parse(s); return v ?? fb; } catch { return fb; } };
+const DOSSIER_STATUSES = ['ACTIVE', 'INACTIVE', 'MIA', 'KIA'];
+const DOSSIER_CLEARANCES = ['LEVEL 1', 'LEVEL 2', 'LEVEL 3', 'LEVEL 4', 'LEVEL 5'];
+
+// قائمة الملفات (نبذة)
+app.get('/api/dossiers', (req, res) => {
+  const rows = db.prepare(`
+    SELECT d.user_id, d.alias, d.status, d.clearance, d.avatar, u.username, u.country_code
+    FROM dossiers d JOIN users u ON u.id = d.user_id
+    WHERE u.role != 'system'
+    ORDER BY u.id ASC`).all();
+  res.json(rows);
+});
+
+// ملف كامل لعميل
+app.get('/api/dossier/:username', (req, res) => {
+  const u = db.prepare("SELECT id, username, country_code, role FROM users WHERE username=? AND role!='system'").get(req.params.username);
+  if (!u) return res.status(404).json({ error: 'الملف غير موجود' });
+  let d = db.prepare('SELECT * FROM dossiers WHERE user_id=?').get(u.id);
+  if (!d) {
+    db.prepare('INSERT INTO dossiers (user_id, updated_at) VALUES (?,?)').run(u.id, Date.now());
+    d = db.prepare('SELECT * FROM dossiers WHERE user_id=?').get(u.id);
+  }
+  res.json({
+    user: { username: u.username, country_code: u.country_code, role: u.role },
+    dossier: {
+      alias: d.alias || '', status: d.status || 'ACTIVE', clearance: d.clearance || 'LEVEL 1',
+      profile: d.profile || '', avatar: d.avatar || '',
+      theaters: parseJson(d.theaters, []), roles: parseJson(d.roles, []),
+      achievements: parseJson(d.achievements, []), skills: parseJson(d.skills, {}),
+      updated_at: d.updated_at,
+    },
+  });
+});
+
+// إنشاء/تحديث الملف (صاحبه أو المدير)
+app.post('/api/dossier', auth, (req, res) => {
+  const me = req.user;
+  let targetId = me.id;
+  if (req.body && req.body.user_id && me.role === 'admin') targetId = Number(req.body.user_id);
+  if (targetId !== me.id && me.role !== 'admin')
+    return res.status(403).json({ error: 'غير مصرح لك بتعديل هذا الملف' });
+  const target = db.prepare("SELECT id FROM users WHERE id=? AND role!='system'").get(targetId);
+  if (!target) return res.status(404).json({ error: 'المستخدم غير موجود' });
+  const b = req.body || {};
+  const str = (v, max) => String(v ?? '').slice(0, max);
+  const arr = (v, max, smax) => (Array.isArray(v) ? v.map((x) => str(x, smax)).filter(Boolean).slice(0, max) : []);
+  const status = DOSSIER_STATUSES.includes(b.status) ? b.status : 'ACTIVE';
+  const clearance = DOSSIER_CLEARANCES.includes(b.clearance) ? b.clearance : 'LEVEL 1';
+  const skills = {};
+  for (const k of Object.keys(SKILLS)) {
+    const v = Number(b.skills && b.skills[k]);
+    skills[k] = Number.isFinite(v) ? Math.max(0, Math.min(5, Math.round(v))) : 0;
+  }
+  db.prepare(`INSERT INTO dossiers (user_id, alias, status, clearance, profile, avatar, theaters, roles, achievements, skills, updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(user_id) DO UPDATE SET alias=excluded.alias, status=excluded.status, clearance=excluded.clearance,
+      profile=excluded.profile, avatar=excluded.avatar, theaters=excluded.theaters, roles=excluded.roles,
+      achievements=excluded.achievements, skills=excluded.skills, updated_at=excluded.updated_at`)
+    .run(targetId, str(b.alias, 60), status, clearance, str(b.profile, 2000), str(b.avatar, 300),
+      JSON.stringify(arr(b.theaters, 43, 5)), JSON.stringify(arr(b.roles, 20, 200)),
+      JSON.stringify(arr(b.achievements, 30, 200)), JSON.stringify(skills), Date.now());
+  res.json({ ok: true });
+});
+
 // ---------- الحسابات ----------
 app.post('/api/register', (req, res) => {
   const { username, email, password, country_code } = req.body || {};
@@ -172,6 +261,7 @@ app.post('/api/register', (req, res) => {
   const r = db.prepare(
     'INSERT INTO users (username,email,password_hash,country_code,role,created_at) VALUES (?,?,?,?,?,?)'
   ).run(username, email.toLowerCase(), hash, country_code, role, Date.now());
+  db.prepare('INSERT INTO dossiers (user_id, updated_at) VALUES (?,?)').run(Number(r.lastInsertRowid), Date.now());
   setSession(res, Number(r.lastInsertRowid));
   res.json({ ok: true, role });
 });

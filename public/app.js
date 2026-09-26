@@ -1,5 +1,18 @@
 // جريدة أرجوس — واجهة التطبيق
 const CATS = { official: 'بيانات رسمية', war: 'سيناريوهات الحروب', events: 'أحداث اللعبة' };
+const SKILLS = {
+  intel: 'الاستخبارات والتجسس',
+  diplomacy: 'التفاوض والتحالفات',
+  econwar: 'الحرب الاقتصادية والدبلوماسية',
+  analysis: 'التحليل الجيوسياسي',
+  planning: 'التخطيط طويل المدى وإدارة الأزمات',
+  resources: 'إدارة الموارد وتحليل البيانات',
+};
+const CLEARANCE_DESC = {
+  'LEVEL 1': 'FIELD OPERATIVE', 'LEVEL 2': 'TACTICAL CLEARANCE', 'LEVEL 3': 'OPERATIONAL COMMAND',
+  'LEVEL 4': 'STRATEGIC CLEARANCE', 'LEVEL 5': 'STRATEGIC COMMAND',
+};
+const STATUS_AR = { ACTIVE: 'نشط', INACTIVE: 'غير نشط', MIA: 'مفقود', KIA: 'قتيل' };
 let COUNTRIES = [], CMAP = {}, me = null;
 const app = document.getElementById('app');
 
@@ -53,7 +66,7 @@ function renderTop() {
   const nav = document.getElementById('mainnav');
   const links = [
     ['#/', 'الرئيسية'], ['#/cat/official', 'بيانات رسمية'], ['#/cat/war', 'سيناريوهات الحروب'],
-    ['#/cat/events', 'أحداث اللعبة'], ['#/dispatches', 'برقيات الدول'],
+    ['#/cat/events', 'أحداث اللعبة'], ['#/dispatches', 'برقيات الدول'], ['#/dossiers', 'ملفات العملاء'],
     ...(me ? [['#/dash', 'لوحة التحكم']] : []),
   ];
   nav.innerHTML = links.map(([h, t]) => `<a href="${h}">${t}</a>`).join('');
@@ -62,11 +75,12 @@ function renderTop() {
 // ---------- الصفحة الرئيسية ----------
 async function vHome() {
   app.innerHTML = '<p class="empty">جارٍ تحميل العدد…</p>';
-  const [official, war, events, dispatches] = await Promise.all([
+  const [official, war, events, dispatches, dossiers] = await Promise.all([
     api('GET', '/articles?category=official&limit=1'),
     api('GET', '/articles?category=war&limit=3'),
     api('GET', '/articles?category=events&limit=3'),
     api('GET', '/dispatches?limit=4'),
+    api('GET', '/dossiers'),
   ]);
   let h = '';
   if (official[0]) {
@@ -88,6 +102,10 @@ async function vHome() {
   if (dispatches.length) {
     h += `<div class="sec-head"><h2>أحدث برقيات الدول</h2><a class="more" href="#/dispatches">الكل ←</a></div>`;
     h += dispatches.map(dispatchHTML).join('');
+  }
+  if (dossiers.length) {
+    h += `<div class="sec-head"><h2>ملفات العملاء</h2><a class="more" href="#/dossiers">الكل ←</a></div>
+      <div class="grid">${dossiers.slice(0, 3).map(dossierCardHTML).join('')}</div>`;
   }
   app.innerHTML = h || '<p class="empty">لا توجد أخبار بعد.</p>';
 }
@@ -203,6 +221,7 @@ async function vDash() {
     <div class="tabs">
       <button onclick="dashTab('new-d')" class="active">برقية جديدة</button>
       <button onclick="dashTab('new-a')">مقال جديد</button>
+      <button onclick="dashTab('dossier')">ملفي الاستخباراتي</button>
       <button onclick="dashTab('mine')">منشوراتي</button>
     </div><div id="dashbody"></div>`;
   dashTab('new-d');
@@ -229,8 +248,12 @@ async function dashTab(t) {
       <div class="field"><label>نص المقال</label><textarea id="abody" style="min-height:220px" placeholder="اكتب سيناريو المعركة أو الحدث بالتفصيل…"></textarea></div>
       <div class="field"><label>صورة المقال (اختياري)</label><input id="aimg" type="file" accept="image/*"></div>
       <button class="btn" onclick="sendArticle()">نشر المقال</button></div>`;
-  } else {
+  } else if (t === 'dossier') {
     btns[2].classList.add('active');
+    body.innerHTML = '<p class="empty">جارٍ تحميل الملف…</p>';
+    await vDashDossier(body);
+  } else {
+    btns[3].classList.add('active');
     body.innerHTML = '<p class="empty">جارٍ التحميل…</p>';
     const [arts, disps] = await Promise.all([
       api('GET', '/articles?limit=100'), api('GET', '/dispatches?limit=100'),
@@ -277,6 +300,8 @@ async function route() {
     else if (h.startsWith('#/cat/')) await vCat(h.split('/')[2]);
     else if (h.startsWith('#/article/')) await vArticle(h.split('/')[2]);
     else if (h === '#/dispatches') await vDispatches();
+    else if (h === '#/dossiers') await vDossiers();
+    else if (h.startsWith('#/dossier/')) await vDossier(decodeURIComponent(h.split('/')[2] || ''));
     else if (h === '#/login') vLogin();
     else if (h === '#/register') await vRegister();
     else if (h === '#/dash') await vDash();
@@ -287,6 +312,145 @@ async function route() {
 function renderTopActive(h) {
   document.querySelectorAll('.mainnav a').forEach((a) =>
     a.classList.toggle('active', a.getAttribute('href') === h.split('?')[0]));
+}
+
+// ---------- ملفات العملاء (الإنجازات) ----------
+const dots = (n) => '●'.repeat(n) + `<span class="dots-off">${'●'.repeat(5 - n)}</span>`;
+function dossierCardHTML(d) {
+  const c = countryOf(d.country_code);
+  return `<div class="card" onclick="location.hash='#/dossier/${esc(d.username)}'">
+    <div class="dos-card-head">
+      ${d.avatar ? `<img class="dos-card-av" src="${esc(d.avatar)}" alt="">` : `<div class="dos-card-flag">${c.flag}</div>`}
+      <div class="grow">
+        <div class="dos-card-name">${esc(d.username)}</div>
+        <div class="hint">${d.alias ? `«${esc(d.alias)}» · ` : ''}${c.flag} ${esc(c.name)}</div>
+      </div>
+      <span class="status-badge ${esc(d.status)}">${STATUS_AR[d.status] || d.status}</span>
+    </div>
+    <div class="card-tx">
+      <div class="hint">CLEARANCE: <b dir="ltr">${esc(d.clearance)}</b></div>
+      <span class="more-link">فتح الملف الاستخباراتي ←</span>
+    </div>
+  </div>`;
+}
+async function vDossiers() {
+  const list = await api('GET', '/dossiers');
+  let h = `<div class="sec-head"><h2>ملفات العملاء</h2></div>
+    <p class="hint" style="margin-top:-10px">سجلات استخباراتية مصنّفة للاعبي المحاكاة: العمليات، المناصب، الإنجازات، ومصفوفة المهارات.</p>`;
+  h += list.length ? `<div class="grid">${list.map(dossierCardHTML).join('')}</div>`
+    : '<p class="empty">لا توجد ملفات بعد — سيظهر ملف كل لاعب هنا فور تسجيله.</p>';
+  app.innerHTML = h;
+}
+async function vDossier(username) {
+  let r;
+  try { r = await api('GET', '/dossier/' + encodeURIComponent(username)); }
+  catch (e) { app.innerHTML = '<p class="empty">الملف غير موجود.</p>'; return; }
+  const { user, dossier: d } = r;
+  const c = countryOf(user.country_code);
+  const isMine = me && me.username === user.username;
+  const theaters = (d.theaters || []).map((t) => { const cc = countryOf(t); return `<div class="dos-row"><span class="dos-flag">${cc.flag}</span><span>${esc(cc.name)}</span></div>`; }).join('');
+  const roles = (d.roles || []).map((x) => `<div class="dos-row"><span class="dos-bullet">▸</span><span>${esc(x)}</span></div>`).join('');
+  const ach = (d.achievements || []).map((x) => `<div class="dos-row ach-row"><span class="dos-star">★</span><span>${esc(x)}</span></div>`).join('');
+  const skills = Object.entries(SKILLS).map(([k, label]) => {
+    const v = Number(d.skills[k]) || 0;
+    return `<div class="dos-skill"><span>${label}</span><span class="dos-dots" dir="ltr">${dots(v)}</span></div>`;
+  }).join('');
+  app.innerHTML = `
+  <div class="dossier">
+    <div class="dos-top"><span>ARGOS // STRATEGIC DOSSIER</span><span class="dos-class">CLASSIFIED // EYES ONLY</span></div>
+    <div class="dos-file" dir="ltr">FILE: ${esc(user.username.toUpperCase())}.CV</div>
+    <div class="dos-id">
+      <div class="dos-photo">
+        ${d.avatar ? `<img src="${esc(d.avatar)}" alt="">` : `<div class="dos-photo-flag">${c.flag}</div>`}
+        <i class="cnr tl"></i><i class="cnr tr"></i><i class="cnr bl"></i><i class="cnr br"></i>
+      </div>
+      <div class="dos-idinfo">
+        <div class="dos-line"><span class="k" dir="ltr">OPERATIVE:</span> <b>${esc(user.username)}</b></div>
+        ${d.alias ? `<div class="dos-line"><span class="k" dir="ltr">ALIAS:</span> ${esc(d.alias)}</div>` : ''}
+        <div class="dos-line"><span class="k" dir="ltr">STATUS:</span> <span class="status-badge ${esc(d.status)}">${STATUS_AR[d.status] || d.status}</span></div>
+        <div class="dos-line"><span class="k" dir="ltr">CLEARANCE:</span> <b dir="ltr">${esc(d.clearance)}</b> <span class="hint">(${CLEARANCE_DESC[d.clearance] || ''})</span></div>
+        <div class="dos-line"><span class="k" dir="ltr">NATION:</span> ${c.flag} ${esc(c.name)}</div>
+        <div class="ribbon">OPERATIVE PROFILE</div>
+        <p class="dos-profile">${d.profile ? esc(d.profile) : '<span class="hint">لا يوجد ملف تعريفي بعد.</span>'}</p>
+        ${isMine ? `<button class="btn ghost" style="margin-top:8px" onclick="location.hash='#/dash'">تعديل ملفي ←</button>` : ''}
+      </div>
+    </div>
+    <div class="dos-cols">
+      <div>
+        <div class="ribbon">THEATERS OF OPERATIONS</div>
+        ${theaters || '<p class="hint">لم تُسجَّل مسارح عمليات بعد.</p>'}
+        <div class="ribbon gold-r">ACHIEVEMENTS · الإنجازات</div>
+        ${ach || '<p class="hint">لا توجد إنجازات مسجلة بعد.</p>'}
+      </div>
+      <div>
+        <div class="ribbon">ROLES &amp; SERVICES</div>
+        ${roles || '<p class="hint">لم تُسجَّل مناصب بعد.</p>'}
+        <div class="ribbon">SKILL MATRIX</div>
+        <div class="dos-skills">${skills}</div>
+      </div>
+    </div>
+    <div class="dos-foot">
+      <span class="hint">ARGOS HEADQUARTERS — INTELLIGENCE DIVISION</span>
+      <span class="stamp">APPROVED</span>
+    </div>
+  </div>`;
+}
+async function vDashDossier(body) {
+  let r;
+  try { r = await api('GET', '/dossier/' + encodeURIComponent(me.username)); }
+  catch (e) { body.innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  const d = r.dossier;
+  const th = new Set(d.theaters || []);
+  body.innerHTML = `<div class="form" style="max-width:760px"><h2>ملفي الاستخباراتي</h2><div id="msg"></div>
+    <div class="field"><label>الصورة الشخصية للملف</label>
+      <div style="display:flex;gap:12px;align-items:center">
+        <img id="favatarprev" src="${esc(d.avatar || '')}" style="width:72px;height:72px;border-radius:50%;object-fit:cover;${d.avatar ? '' : 'display:none'}">
+        <input id="favatar" type="file" accept="image/*">
+      </div><input id="favatarurl" type="hidden" value="${esc(d.avatar || '')}"></div>
+    <div class="field"><label>الاسم المستعار (Alias)</label><input id="falias" value="${esc(d.alias)}" placeholder="مثال: الثعلب" dir="ltr"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div class="field"><label>الحالة (Status)</label><select id="fstatus">
+        ${Object.entries(STATUS_AR).map(([k, v]) => `<option value="${k}"${d.status === k ? ' selected' : ''}>${v} (${k})</option>`).join('')}</select></div>
+      <div class="field"><label>مستوى التصريح (Clearance)</label><select id="fclearance">
+        ${Object.keys(CLEARANCE_DESC).map((k) => `<option${d.clearance === k ? ' selected' : ''}>${k}</option>`).join('')}</select></div>
+    </div>
+    <div class="field"><label>الملف التعريفي (Operative Profile)</label>
+      <textarea id="fprofile" placeholder="نبذة عن العميل: خبراته، أسلوبه، تخصصاته…">${esc(d.profile)}</textarea></div>
+    <div class="field"><label>مسارح العمليات (Theaters)</label>
+      <div class="check-grid">${COUNTRIES.map((x) => `<label><input type="checkbox" class="fth" value="${x.code}"${th.has(x.code) ? ' checked' : ''}> ${x.flag} ${esc(x.name)}</label>`).join('')}</div></div>
+    <div class="field"><label>المناصب والخدمات (سطر لكل منصب)</label>
+      <textarea id="froles" placeholder="مثال: رئيس وزراء بريطانيا&#10;عميل في جهاز الأمن الفيدرالي">${esc((d.roles || []).join('\n'))}</textarea></div>
+    <div class="field"><label>🏆 الإنجازات (سطر لكل إنجاز)</label>
+      <textarea id="fach" placeholder="مثال: قاد حملة البلقان بنجاح سنة 1901&#10;أبرم تحالفًا مع ثلاث دول">${esc((d.achievements || []).join('\n'))}</textarea></div>
+    <div class="field"><label>مصفوفة المهارات (Skill Matrix)</label>
+      <div class="dos-skills-edit">${Object.entries(SKILLS).map(([k, label]) => `
+        <div class="dos-skill"><span>${label}</span>
+          <select id="fsk_${k}" dir="ltr">${[0, 1, 2, 3, 4, 5].map((n) => `<option value="${n}"${Number(d.skills[k]) === n ? ' selected' : ''}>${'●'.repeat(n) || '○'}</option>`).join('')}</select>
+        </div>`).join('')}</div></div>
+    <button class="btn" onclick="saveDossier()">حفظ الملف</button>
+    <button class="btn ghost" onclick="location.hash='#/dossier/${esc(me.username)}'" style="margin-inline-start:8px">معاينة الملف</button>
+  </div>`;
+  document.getElementById('favatar').onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try { msg('جارٍ رفع الصورة…', true); const url = await uploadImage(f);
+      document.getElementById('favatarurl').value = url;
+      const p = document.getElementById('favatarprev'); p.src = url; p.style.display = '';
+      msg('تم رفع الصورة ✓', true);
+    } catch (err) { msg(err.message, false); }
+  };
+}
+async function saveDossier() {
+  try {
+    const skills = {};
+    for (const k of Object.keys(SKILLS)) skills[k] = Number(document.getElementById('fsk_' + k).value);
+    await api('POST', '/dossier', {
+      alias: val('falias'), status: val('fstatus'), clearance: val('fclearance'),
+      profile: val('fprofile'), avatar: document.getElementById('favatarurl').value,
+      theaters: [...document.querySelectorAll('.fth:checked')].map((x) => x.value),
+      roles: val('froles').split('\n'), achievements: val('fach').split('\n'), skills,
+    });
+    msg('تم حفظ ملفك الاستخباراتي ✓', true);
+  } catch (e) { msg(e.message, false); }
 }
 
 // ---------- بدء ----------
