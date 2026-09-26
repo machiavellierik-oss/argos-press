@@ -1,0 +1,1 @@
+{"dependencies":{"bcryptjs":"^2.4.3","express":"^4.19.2","multer":"^1.4.5-lts.1"},"description":"جريدة أرجوس — الصحيفة الرسمية للعبة المحاكاة: نشر سيناريوهات الحروب وأحداث اللعبة، حسابات اللاعبين، والتغريد باسم الدولة","license":"MIT","main":"server.js","name":"argos-press","scripts":{"start":"node server.js"},"version":"1.0.0"}

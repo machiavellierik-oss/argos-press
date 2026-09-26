@@ -1,0 +1,120 @@
+/* جريدة أرجوس — صحيفة عربية */
+:root{
+  --blue:#1e50c8; --blue-dark:#143a94; --ink:#16161a; --muted:#6b6b72;
+  --paper:#fbfaf6; --card:#ffffff; --line:#e7e1d3; --gold:#b98a1d;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:'IBM Plex Sans Arabic',system-ui,Tahoma,sans-serif;line-height:1.8}
+.wrap{max-width:1080px;margin:0 auto;padding:0 16px}
+h1,h2,h3,.serif{font-family:'Amiri',serif}
+
+/* الشريط العلوي */
+.topbar{background:var(--ink);color:#eee;font-size:.82rem}
+.topbar-in{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 16px;flex-wrap:wrap}
+.topbar-tag{color:#ffd766}
+#userbox a{color:#fff;text-decoration:none;margin:0 6px}
+#userbox a:hover{text-decoration:underline}
+
+/* الترويسة */
+.masthead{text-align:center;padding:34px 0 18px;border-bottom:5px double var(--ink)}
+.emblem{width:74px;height:74px;margin:0 auto 10px;border:3px solid var(--blue);border-radius:50%;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--blue);font-size:1.4rem}
+.emblem span{font-size:.7rem;letter-spacing:2px}
+.paper-title{font-size:3.4rem;margin:0;color:var(--ink);font-weight:700}
+.paper-sub{color:var(--muted);margin:6px 0 0}
+
+/* التنقل */
+.mainnav{background:var(--blue);position:sticky;top:0;z-index:50}
+.mainnav .wrap{display:flex;gap:4px;overflow-x:auto;padding:0 8px}
+.mainnav a{color:#fff;text-decoration:none;padding:12px 16px;white-space:nowrap;font-weight:600;font-size:.95rem}
+.mainnav a:hover,.mainnav a.active{background:var(--blue-dark)}
+
+/* المحتوى */
+#app{min-height:60vh;padding:26px 0}
+.sec-head{display:flex;align-items:center;gap:12px;margin:30px 0 16px;
+  border-bottom:3px solid var(--ink);padding-bottom:8px}
+.sec-head h2{margin:0;font-size:1.7rem}
+.sec-head .more{margin-inline-start:auto;font-size:.85rem;color:var(--blue);text-decoration:none}
+
+/* الخبر الرئيسي */
+.hero{display:grid;grid-template-columns:1.2fr 1fr;gap:0;background:var(--card);
+  border:1px solid var(--line);margin-bottom:26px;cursor:pointer}
+.hero img{width:100%;height:100%;min-height:280px;object-fit:cover;display:block}
+.hero .hero-tx{padding:26px}
+.badge{display:inline-block;background:var(--blue);color:#fff;font-size:.75rem;
+  padding:3px 12px;border-radius:20px;margin-bottom:10px}
+.badge.gold{background:var(--gold)}
+.hero h2{font-size:2rem;margin:0 0 10px;line-height:1.5}
+.hero p{color:var(--muted)}
+
+/* شبكة الأخبار */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:18px}
+.card{background:var(--card);border:1px solid var(--line);cursor:pointer;
+  transition:transform .15s,box-shadow .15s;display:flex;flex-direction:column}
+.card:hover{transform:translateY(-3px);box-shadow:0 8px 22px rgba(0,0,0,.08)}
+.card img{width:100%;height:170px;object-fit:cover}
+.card .card-tx{padding:14px 16px}
+.card h3{margin:0 0 8px;font-size:1.25rem;line-height:1.6}
+.card p{color:var(--muted);font-size:.9rem;margin:0}
+.meta{font-size:.78rem;color:var(--muted);margin-top:10px}
+.country-flag{font-size:1.1em}
+
+/* صفحة المقال */
+.article{background:var(--card);border:1px solid var(--line);padding:34px;max-width:800px;margin:0 auto}
+.article h1{font-size:2.2rem;line-height:1.6;margin:0 0 12px}
+.article .lead-img{width:100%;max-height:420px;object-fit:cover;margin:18px 0}
+.article .body{font-size:1.12rem;white-space:pre-wrap}
+.byline{display:flex;align-items:center;gap:10px;border-top:1px solid var(--line);
+  border-bottom:1px solid var(--line);padding:10px 0;margin:14px 0;color:var(--muted);font-size:.9rem}
+
+/* برقيات الدول */
+.dispatch{background:var(--card);border:1px solid var(--line);border-radius:12px;
+  padding:16px 18px;margin-bottom:14px}
+.dispatch .d-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.dispatch .d-flag{font-size:1.8rem}
+.dispatch .d-country{font-weight:700}
+.dispatch .d-user{color:var(--muted);font-size:.82rem}
+.dispatch .d-time{margin-inline-start:auto;color:var(--muted);font-size:.78rem}
+.dispatch p{margin:8px 0}
+.dispatch img{width:100%;max-height:380px;object-fit:cover;border-radius:8px;margin-top:8px}
+.stamp{display:inline-block;border:2px solid var(--blue);color:var(--blue);font-size:.72rem;
+  font-weight:700;padding:1px 10px;border-radius:4px;transform:rotate(-4deg)}
+
+/* النماذج */
+.form{background:var(--card);border:1px solid var(--line);padding:26px;max-width:640px;margin:0 auto}
+.form h2{margin-top:0}
+.field{margin-bottom:16px}
+.field label{display:block;font-weight:600;margin-bottom:6px}
+.field input,.field select,.field textarea{width:100%;padding:11px 13px;font-size:1rem;
+  border:1px solid var(--line);border-radius:8px;font-family:inherit;background:#fff}
+.field textarea{min-height:130px;resize:vertical}
+.field input:focus,.field select:focus,.field textarea:focus{outline:2px solid var(--blue);border-color:var(--blue)}
+.btn{background:var(--blue);color:#fff;border:none;padding:12px 30px;font-size:1rem;font-weight:700;
+  border-radius:8px;cursor:pointer;font-family:inherit}
+.btn:hover{background:var(--blue-dark)}
+.btn.danger{background:#b3261e}
+.btn.ghost{background:#eee;color:var(--ink)}
+.err{background:#fdecea;color:#b3261e;border:1px solid #f5c6c2;padding:10px 14px;border-radius:8px;margin-bottom:14px}
+.okmsg{background:#e7f6e7;color:#1d6b1d;border:1px solid #bfe3bf;padding:10px 14px;border-radius:8px;margin-bottom:14px}
+.hint{font-size:.83rem;color:var(--muted)}
+
+/* لوحة التحكم */
+.tabs{display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap}
+.tabs button{border:1px solid var(--line);background:var(--card);padding:9px 20px;border-radius:20px;
+  cursor:pointer;font-family:inherit;font-weight:600}
+.tabs button.active{background:var(--ink);color:#fff}
+.row-item{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);
+  padding:12px 16px;margin-bottom:10px;border-radius:8px}
+.row-item .grow{flex:1}
+
+/* التذييل */
+.footer{background:var(--ink);color:#bbb;margin-top:50px;padding:30px 0;font-size:.9rem;text-align:center}
+.footer .dim{color:#777;font-size:.8rem}
+
+.empty{text-align:center;color:var(--muted);padding:40px 0}
+@media(max-width:720px){
+  .hero{grid-template-columns:1fr}
+  .paper-title{font-size:2.4rem}
+  .article{padding:20px}
+}
