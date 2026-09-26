@@ -22,6 +22,16 @@ const CATEGORIES = {
   events: 'أحداث اللعبة',
 };
 
+// ---------- ساعة اللعبة ----------
+// كل 24 ساعة واقعية = سنة كاملة داخل اللعبة (كل ساعتين حقيقيتين = شهر)
+// بداية اللعبة: الأحد 27 سبتمبر 2026 — 18:00 بتوقيت غرينتش = يناير 1900
+const GAME_EPOCH_REAL = Date.UTC(2026, 8, 27, 18, 0, 0);
+const GAME_MONTH_MS = 2 * 3600 * 1000;
+function gameDateOf(startedAt, nowMs) {
+  const m = Math.max(0, Math.floor((nowMs - startedAt) / GAME_MONTH_MS));
+  return { year: 1900 + Math.floor(m / 12), month: (m % 12) + 1 };
+}
+
 // مهارات العملاء (مصفوفة المهارات في الملف الاستخباراتي)
 const SKILLS = {
   intel: 'الاستخبارات والتجسس',
@@ -156,6 +166,22 @@ async function initDb() {
       ['argos_hq', 'hq@argos.internal', '!', 'HQ', 'system', Date.now()]
     );
   }
+  // حساب المطورين الكامل (ARGOS HQ) — المسؤول الوحيد عنه هو اللاعب الأمريكي
+  let dev = await one("SELECT id FROM users WHERE username='argos_dev'");
+  if (!dev) {
+    dev = await one(
+      'INSERT INTO users (username,email,password_hash,country_code,role,bio,avatar,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',
+      ['argos_dev', 'dev@argos.internal', '!', 'HQ', 'developer',
+        '🛠️ الحساب الرسمي لمطوري منصة أرجوس — تشغيل ساعة اللعبة وإدارة المنصة.',
+        '/logo.jpg', Date.now()]
+    );
+  }
+  // جدول ساعة اللعبة (صف واحد)
+  await q(`CREATE TABLE IF NOT EXISTS game_clock (
+    id INTEGER PRIMARY KEY, started_at BIGINT, running INTEGER DEFAULT 0, updated_by INTEGER
+  )`);
+  const gc = await one('SELECT id FROM game_clock WHERE id=1');
+  if (!gc) await q('INSERT INTO game_clock (id,started_at,running) VALUES (1,NULL,0)');
   const n = await one('SELECT COUNT(*) AS c FROM articles');
   if (Number(n.c) === 0) {
     await q(
@@ -238,6 +264,11 @@ async function auth(req, res, next) {
 }
 // طاقم المقر: الأدمن + حساب argos HQ
 const isStaff = (u) => u && (u.role === 'admin' || u.role === 'system');
+const isDeveloper = (u) => u && u.role === 'developer';
+// التبديل بين الحسابات حصرًا: اللاعب الأمريكي (أدمن بدولة US) وحساب المطورين — لا أحد غيرهما
+const canSwitch = (u) => u && (isDeveloper(u) || (u.role === 'admin' && u.country_code === 'US'));
+const requireDeveloper = (req, res, next) =>
+  isDeveloper(req.user) ? next() : res.status(403).json({ error: 'تشغيل الساعة حصرًا عبر حساب المطورين' });
 const requireStaff = (req, res, next) =>
   isStaff(req.user) ? next() : res.status(403).json({ error: 'هذه الخاصية لإدارة المقر فقط' });
 const validCountry = (c) => COUNTRIES.some((x) => x.code === c);
@@ -297,7 +328,7 @@ app.get('/api/conflict', ah(async (req, res) => {
 
 // الدول المحجوزة من طرف لاعبين (لمنع تكرار اختيار نفس الدولة)
 app.get('/api/taken-countries', ah(async (req, res) => {
-  const rows = await all("SELECT DISTINCT country_code FROM users WHERE role!='system'");
+  const rows = await all("SELECT DISTINCT country_code FROM users WHERE role NOT IN ('system','developer')");
   res.json(rows.map((r) => r.country_code));
 }));
 
@@ -311,14 +342,14 @@ app.get('/api/dossiers', ah(async (req, res) => {
            COALESCE(d.clearance,'LEVEL 1') AS clearance, COALESCE(d.avatar,'') AS avatar,
            u.username, u.country_code
     FROM users u LEFT JOIN dossiers d ON d.user_id = u.id
-    WHERE u.role != 'system'
+    WHERE u.role NOT IN ('system','developer')
     ORDER BY u.id ASC`);
   res.json(rows);
 }));
 
 // ملف كامل لعميل
 app.get('/api/dossier/:username', ah(async (req, res) => {
-  const u = await one("SELECT id, username, country_code, role FROM users WHERE username=$1 AND role!='system'", [req.params.username]);
+  const u = await one("SELECT id, username, country_code, role FROM users WHERE username=$1 AND role NOT IN ('system','developer')", [req.params.username]);
   if (!u) return res.status(404).json({ error: 'الملف غير موجود' });
   let d = await one('SELECT * FROM dossiers WHERE user_id=$1', [u.id]);
   if (!d) {
@@ -344,7 +375,7 @@ app.post('/api/dossier', ah(auth), ah(async (req, res) => {
   if (req.body && req.body.user_id && me.role === 'admin') targetId = Number(req.body.user_id);
   if (targetId !== me.id && me.role !== 'admin')
     return res.status(403).json({ error: 'غير مصرح لك بتعديل هذا الملف' });
-  const target = await one("SELECT id FROM users WHERE id=$1 AND role!='system'", [targetId]);
+  const target = await one("SELECT id FROM users WHERE id=$1 AND role NOT IN ('system','developer')", [targetId]);
   if (!target) return res.status(404).json({ error: 'المستخدم غير موجود' });
   const b = req.body || {};
   const str = (v, max) => String(v ?? '').slice(0, max);
@@ -380,11 +411,11 @@ app.post('/api/register', ah(async (req, res) => {
     return res.status(400).json({ error: 'اختر الدولة التي ستلعب بها' });
   const dup = await one('SELECT id FROM users WHERE username=$1 OR email=$2', [username, email]);
   if (dup) return res.status(409).json({ error: 'اسم المستخدم أو البريد مسجّل مسبقًا' });
-  const taken = await one("SELECT username FROM users WHERE country_code=$1 AND role!='system'", [country_code]);
+  const taken = await one("SELECT username FROM users WHERE country_code=$1 AND role NOT IN ('system','developer')", [country_code]);
   if (taken) return res.status(409).json({ error: 'هذه الدولة محجوزة مسبقًا من طرف لاعب آخر — اختر دولة أخرى' });
 
   const hash = bcrypt.hashSync(password, 10);
-  const cnt = await one("SELECT COUNT(*) AS c FROM users WHERE role!='system'");
+  const cnt = await one("SELECT COUNT(*) AS c FROM users WHERE role NOT IN ('system','developer')");
   const role = Number(cnt.c) === 0 ? 'admin' : 'player'; // أول لاعب يسجّل = إدارة المقر
   const r = await one(
     'INSERT INTO users (username,email,password_hash,country_code,role,created_at) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
@@ -423,7 +454,7 @@ app.get('/api/me', ah(async (req, res) => {
 // ---------- إدارة المقر (حظر/طرد/كلمة سر HQ) ----------
 // توكن إضافي لتبديل الحسابات (يُحفظ في المتصفح)
 app.post('/api/account-token', ah(auth), ah(async (req, res) => {
-  if (!isStaff(req.user)) return res.status(403).json({ error: 'تبديل الحسابات متاح لإدارة المقر فقط' });
+  if (!canSwitch(req.user)) return res.status(403).json({ error: 'تبديل الحسابات متاح للاعب الأمريكي وحساب المطورين فقط' });
   const token = crypto.randomBytes(32).toString('hex');
   await q('INSERT INTO sessions (token,user_id,expires_at) VALUES ($1,$2,$3)',
     [token, req.user.id, Date.now() + 30 * 24 * 3600 * 1000]);
@@ -445,7 +476,7 @@ app.get('/api/admin/users', ah(auth), requireStaff, ah(async (req, res) => {
 app.post('/api/admin/ban', ah(auth), requireStaff, ah(async (req, res) => {
   const { user_id } = req.body || {};
   const t = await one('SELECT id,username,role FROM users WHERE id=$1', [user_id]);
-  if (!t || t.role === 'system') return res.status(404).json({ error: 'المستخدم غير موجود' });
+  if (!t || t.role === 'system' || t.role === 'developer') return res.status(404).json({ error: 'المستخدم غير موجود' });
   if (t.id === req.user.id) return res.status(400).json({ error: 'لا يمكنك حظر نفسك' });
   await q('UPDATE users SET banned=1 WHERE id=$1', [t.id]);
   await q('DELETE FROM sessions WHERE user_id=$1', [t.id]);
@@ -462,7 +493,7 @@ app.post('/api/admin/unban', ah(auth), requireStaff, ah(async (req, res) => {
 // طرد نهائي: حذف الحساب وكل محتواه
 app.delete('/api/admin/users/:id', ah(auth), requireStaff, ah(async (req, res) => {
   const t = await one('SELECT id,username,role FROM users WHERE id=$1', [req.params.id]);
-  if (!t || t.role === 'system') return res.status(404).json({ error: 'المستخدم غير موجود' });
+  if (!t || t.role === 'system' || t.role === 'developer') return res.status(404).json({ error: 'المستخدم غير موجود' });
   if (t.id === req.user.id) return res.status(400).json({ error: 'لا يمكنك طرد نفسك' });
   const uid = t.id;
   const artIds = (await all('SELECT id FROM articles WHERE user_id=$1', [uid])).map((r) => r.id);
@@ -495,6 +526,36 @@ app.post('/api/admin/hq-password', ah(auth), requireStaff, ah(async (req, res) =
   const hash = bcrypt.hashSync(password, 10);
   await q("UPDATE users SET password_hash=$1 WHERE username='argos_hq'", [hash]);
   res.json({ ok: true });
+}));
+
+// تعيين كلمة سر حساب المطورين ARGOS HQ
+app.post('/api/admin/dev-password', ah(auth), requireStaff, ah(async (req, res) => {
+  const { password } = req.body || {};
+  if (!password || password.length < 6)
+    return res.status(400).json({ error: 'كلمة المرور 6 أحرف على الأقل' });
+  const hash = bcrypt.hashSync(password, 10);
+  await q("UPDATE users SET password_hash=$1 WHERE username='argos_dev'", [hash]);
+  res.json({ ok: true });
+}));
+
+// ---------- ساعة اللعبة (التحكم حصرًا لحساب المطورين) ----------
+app.get('/api/clock', ah(async (req, res) => {
+  const row = await one('SELECT started_at,running FROM game_clock WHERE id=1');
+  const started = row && row.started_at ? Number(row.started_at) : null;
+  const running = !!(row && row.running);
+  res.json({
+    running, started_at: started, now: Date.now(), epoch_real: GAME_EPOCH_REAL,
+    game: running && started ? gameDateOf(started, Date.now()) : null,
+  });
+}));
+app.post('/api/clock/start', ah(auth), requireDeveloper, ah(async (req, res) => {
+  const now = Date.now();
+  await q('UPDATE game_clock SET started_at=$1, running=1, updated_by=$2 WHERE id=1', [now, req.user.id]);
+  res.json({ ok: true, running: true, started_at: now, game: gameDateOf(now, now) });
+}));
+app.post('/api/clock/stop', ah(auth), requireDeveloper, ah(async (req, res) => {
+  await q('UPDATE game_clock SET running=0, updated_by=$1 WHERE id=1', [req.user.id]);
+  res.json({ ok: true, running: false });
 }));
 
 // ---------- رفع صورة ----------
@@ -766,7 +827,7 @@ app.get('/api/dispatches/:id', ah(async (req, res) => {
 // ---------- الرسائل الخاصة ----------
 // قائمة المستخدمين (لبدء محادثة جديدة)
 app.get('/api/users', ah(auth), ah(async (req, res) => {
-  const rows = await all("SELECT username,country_code,avatar FROM users WHERE id!=$1 AND role!='system' ORDER BY username ASC LIMIT 200", [req.user.id]);
+  const rows = await all("SELECT username,country_code,avatar FROM users WHERE id!=$1 AND role NOT IN ('system','developer') ORDER BY username ASC LIMIT 200", [req.user.id]);
   res.json(rows.map((u) => ({ username: u.username, country_code: u.country_code, avatar: u.avatar || '' })));
 }));
 // قائمة المحادثات
@@ -797,7 +858,7 @@ app.get('/api/conversations', ah(auth), ah(async (req, res) => {
 }));
 // محادثة مع مستخدم (وتعليم المقروء)
 app.get('/api/messages/:username', ah(auth), ah(async (req, res) => {
-  const other = await one("SELECT id,username,country_code,avatar FROM users WHERE username=$1 AND role!='system'", [req.params.username]);
+  const other = await one("SELECT id,username,country_code,avatar FROM users WHERE username=$1 AND role NOT IN ('system','developer')", [req.params.username]);
   if (!other) return res.status(404).json({ error: 'المستخدم غير موجود' });
   if (other.id === req.user.id) return res.status(400).json({ error: 'لا يمكنك مراسلة نفسك' });
   await q('UPDATE messages SET read_at=$1 WHERE sender_id=$2 AND receiver_id=$3 AND read_at IS NULL', [Date.now(), other.id, req.user.id]);
@@ -819,7 +880,7 @@ app.get('/api/messages/:username', ah(auth), ah(async (req, res) => {
 // إرسال رسالة
 app.post('/api/messages', ah(auth), ah(async (req, res) => {
   const { to, body, image } = req.body || {};
-  const other = await one("SELECT id FROM users WHERE username=$1 AND role!='system'", [to]);
+  const other = await one("SELECT id FROM users WHERE username=$1 AND role NOT IN ('system','developer')", [to]);
   if (!other) return res.status(404).json({ error: 'المستخدم غير موجود' });
   if (other.id === req.user.id) return res.status(400).json({ error: 'لا يمكنك مراسلة نفسك' });
   const b = String(body || '').trim().slice(0, 1000);

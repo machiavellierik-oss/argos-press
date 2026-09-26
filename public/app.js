@@ -324,6 +324,7 @@ async function vHome() {
     `<button class="ttab active" data-ht="d">البرقيات</button><button class="ttab" data-ht="a">المقالات</button>`) +
     `<div id="sbar"></div>` + composerHTML()
     + `<a class="war-banner" href="#/news"><span class="wb-ic">🌍</span><span class="wb-tx"><b>غرفة الحرب</b><i>خريطة الصراع المباشرة وشدة النزاعات</i></span><span class="wb-go">←</span></a>`
+    + `<div id="clockbox"></div>`
     + `<div id="feed"><div class="spin"></div></div>`;
   bindComposer(() => route());
   document.getElementById('sbar').innerHTML = await storyBarHTML();
@@ -347,6 +348,7 @@ async function vHome() {
     } catch (e) { feed.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
   };
   tabs.forEach((t) => t.onclick = () => load(t.dataset.ht));
+  mountClock(document.getElementById('clockbox'));
   await load('d');
 }
 
@@ -373,6 +375,59 @@ async function vCat(cat) {
   } catch (e) { document.getElementById('feed').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 
+// ---------- ساعة أرجوس الرسمية ----------
+// كل 24 ساعة واقعية = سنة كاملة داخل اللعبة (كل ساعتين = شهر)
+const AR_MONTHS = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+const GAME_MONTH_MS = 2 * 3600 * 1000;
+function gameDateOf(startedAt, nowMs) {
+  const m = Math.max(0, Math.floor((nowMs - startedAt) / GAME_MONTH_MS));
+  return { year: 1900 + Math.floor(m / 12), month: (m % 12) + 1 };
+}
+function fmtGMT(ts) {
+  return new Intl.DateTimeFormat('ar', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date(ts)) + ' GMT';
+}
+let clockTimers = [], clockState = null;
+function clearClock() { clockTimers.forEach(clearInterval); clockTimers = []; }
+async function mountClock(el) {
+  clearClock();
+  if (!el) return;
+  el.innerHTML = '<div class="spin"></div>';
+  try { clockState = await api('GET', '/clock'); }
+  catch (e) { el.innerHTML = '<div class="clock-box"><div class="err">تعذّر تحميل الساعة</div></div>'; return; }
+  const tick = () => {
+    if (!document.body.contains(el)) { clearClock(); return; }
+    const now = Date.now();
+    let game = '—', status = '⏸️ الساعة متوقفة — بانتظار تشغيل المطورين';
+    if (clockState && clockState.running && clockState.started_at) {
+      const g = gameDateOf(clockState.started_at, now);
+      game = `${AR_MONTHS[g.month - 1]} ${g.year}`;
+      status = '🟢 اللعبة جارية';
+    }
+    el.innerHTML = `<div class="clock-box">
+      <div class="clock-head">🕰️ ساعة أرجوس الرسمية</div>
+      <div class="clock-row"><span class="clock-lbl">العالم الواقعي (غرينتش)</span><b>${fmtGMT(now)}</b></div>
+      <div class="clock-row"><span class="clock-lbl">زمن اللعبة</span><b class="clock-game">${game}</b></div>
+      <div class="clock-foot">${status} · كل 24 ساعة واقعية = سنة كاملة داخل اللعبة</div>
+      ${me && me.role === 'developer' ? `<div class="clock-ctl">
+        <button class="btn" style="width:auto;padding:8px 22px" onclick="clockStart()">▶ تشغيل الساعة</button>
+        <button class="btn ghost" style="width:auto;padding:8px 22px" onclick="clockStop()">⏸ إيقاف</button>
+      </div>` : ''}
+    </div>`;
+  };
+  tick();
+  clockTimers.push(setInterval(tick, 1000));
+  clockTimers.push(setInterval(async () => {
+    try { const s = await api('GET', '/clock'); clockState = s; } catch (e) {}
+  }, 60000));
+}
+async function clockStart() {
+  try { clockState = await api('POST', '/clock/start'); alert('بدأت الساعة ✓ — انطلق زمن اللعبة من يناير 1900'); }
+  catch (e) { alert(e.message); }
+}
+async function clockStop() {
+  try { clockState = await api('POST', '/clock/stop'); }
+  catch (e) { alert(e.message); }
+}
 // ---------- غرفة الحرب (خريطة الصراع) ----------
 const SEV_AR = { RED: 'مرتفع', ORANGE: 'متوسط', YELLOW: 'منخفض' };
 const TREND_AR = { up: 'متصاعد', down: 'متراجع', steady: 'مستقر' };
@@ -392,6 +447,7 @@ async function vNews() {
           </div>
         </div>
       </div>
+      <div id="clockbox"></div>
       <div class="war-sec"><div class="war-sec-t">شدة الصراع — نافذة 30 يومًا</div><div id="wtable"><div class="spin"></div></div></div>
       <div class="war-sec"><div class="war-sec-t">الموجز اليومي</div><div id="wbriefs"><div class="spin"></div></div></div>`;
   let rows = [];
@@ -400,6 +456,7 @@ async function vNews() {
   initGlobe(rows);
   renderWarTable(rows);
   renderBriefs(rows);
+  mountClock(document.getElementById('clockbox'));
 }
 let THREE_PROMISE = null;
 function loadThree(ok, fail) {
@@ -826,6 +883,9 @@ async function vDash() {
   if (!me) { location.hash = '#/login'; return; }
   const c = countryOf(me.country_code);
   const staff = me.role === 'admin' || me.role === 'system';
+  // التبديل حصرًا: اللاعب الأمريكي (أدمن بدولة US) وحساب المطورين — لا أحد غيرهما
+  const canSwitch = me.role === 'developer' || (me.role === 'admin' && me.country_code === 'US');
+  const hqAccess = staff || me.role === 'developer'; // إدارة المنصة
   const [arts, disps] = await Promise.all([
     api('GET', '/articles?limit=100').catch(() => []), api('GET', '/dispatches?limit=100').catch(() => []),
   ]);
@@ -852,13 +912,13 @@ async function vDash() {
       <div class="p-meta"><span><b>${mine_d}</b> برقية</span><span><b>${mine_a}</b> مقال</span></div>
     </div>
     <div class="ptabs">
-      <button class="ptab active" data-pt="feed">منشوراتي</button>
-      <button class="ptab" data-pt="new-d">برقية جديدة</button>
-      ${staff ? '<button class="ptab" data-pt="new-a">مقال جديد</button>' : ''}
-      <button class="ptab" data-pt="edit">تعديل البروفايل</button>
-      <button class="ptab" data-pt="dossier">ملفي الاستخباراتي</button>
-      ${staff ? '<button class="ptab" data-pt="switch">🔄 تبديل الحسابات</button>' : ''}
-      ${staff ? '<button class="ptab" data-pt="admin">🛡️ إدارة المنصة</button>' : ''}
+      <button class="ptab active" data-pt="feed" title="منشوراتي">🗞️</button>
+      <button class="ptab" data-pt="new-d" title="برقية جديدة">✍️</button>
+      ${staff ? '<button class="ptab" data-pt="new-a" title="مقال جديد">🖋️</button>' : ''}
+      <button class="ptab" data-pt="edit" title="تعديل البروفايل">⚙️</button>
+      <button class="ptab" data-pt="dossier" title="ملفي الاستخباراتي">🗂️</button>
+      ${canSwitch ? '<button class="ptab" data-pt="switch" title="تبديل الحسابات">🔄</button>' : ''}
+      ${hqAccess ? '<button class="ptab" data-pt="admin" title="إدارة المنصة">🛡️</button>' : ''}
     </div>
     <div id="pbody"></div>`;
   const tabs = app.querySelectorAll('[data-pt]');
@@ -998,7 +1058,7 @@ function removeAccount(i) {
 async function renderAdminTab(body) {
   body.innerHTML = '<div class="spin"></div>';
   let users = [];
-  try { users = await api('GET', '/api/admin/users'); }
+  try { users = await api('GET', '/admin/users'); }
   catch (e) { body.innerHTML = `<div class="form-dark"><div class="err">${esc(e.message)}</div></div>`; return; }
   body.innerHTML = `<div class="form-dark"><h2>🛡️ إدارة المنصة</h2>
     <div class="sec-h">حساب argos HQ</div>
@@ -1007,37 +1067,52 @@ async function renderAdminTab(body) {
     <div class="field"><label>كلمة سر جديدة لحساب argos HQ</label>
       <input id="hqpass" type="password" placeholder="6 أحرف على الأقل" autocomplete="new-password"></div>
     <button class="btn" style="width:auto;padding:10px 32px" onclick="setHqPassword()">تعيين كلمة السر</button>
+    <div class="sec-h" style="margin-top:18px">حساب المطورين ARGOS HQ</div>
+    <p class="hint">البريد: <b dir="ltr">dev@argos.internal</b> — الحساب الكامل للمطورين: تشغيل ساعة اللعبة وإدارة المنصة. المسؤول الوحيد عنه هو اللاعب الأمريكي.</p>
+    <div class="field"><label>كلمة سر جديدة لحساب المطورين</label>
+      <input id="devpass" type="password" placeholder="6 أحرف على الأقل" autocomplete="new-password"></div>
+    <button class="btn" style="width:auto;padding:10px 32px" onclick="setDevPassword()">تعيين كلمة السر</button>
     <div class="sec-h" style="margin-top:18px">المستخدمون (${users.length})</div>
     <div>` + (users.map((u) => {
       const c = countryOf(u.country_code);
-      return `<div class="row-item"><span class="grow">${c.flag} <b>${esc(u.username)}</b> <span class="hint">${esc(c.name)}${u.role === 'admin' ? ' · ⭐ أدمن' : ''}${u.banned ? ' · ⛔ محظور' : ''}</span></span>
-        ${u.banned
+      const roleTag = u.role === 'admin' ? ' · ⭐ أدمن' : u.role === 'developer' ? ' · 🛠️ المطورون' : '';
+      const actions = u.role === 'developer'
+        ? '<span class="hint">🛠️ حساب المطورين — محمي من الحظر والطرد</span>'
+        : (u.banned
           ? `<button class="btn" style="width:auto;padding:8px 14px" onclick="unbanUser(${u.id})">إلغاء الحظر</button>`
-          : `<button class="btn danger" style="width:auto;padding:8px 14px" onclick="banUser(${u.id},'${esc(u.username)}')">حظر</button>`}
-        <button class="btn danger" style="width:auto;padding:8px 14px" onclick="kickUser(${u.id},'${esc(u.username)}')">طرد</button>
-      </div>`;
+          : `<button class="btn danger" style="width:auto;padding:8px 14px" onclick="banUser(${u.id},'${esc(u.username)}')">حظر</button>`)
+          + `<button class="btn danger" style="width:auto;padding:8px 14px" onclick="kickUser(${u.id},'${esc(u.username)}')">طرد</button>`;
+      return `<div class="row-item"><span class="grow">${c.flag} <b>${esc(u.username)}</b> <span class="hint">${esc(c.name)}${roleTag}${u.banned ? ' · ⛔ محظور' : ''}</span></span>${actions}</div>`;
     }).join('') || '<p class="hint">لا يوجد مستخدمون.</p>') + `</div></div>`;
 }
 async function setHqPassword() {
   const p = document.getElementById('hqpass').value;
   try {
-    await api('POST', '/api/admin/hq-password', { password: p });
+    await api('POST', '/admin/hq-password', { password: p });
     msg('تم تعيين كلمة سر argos HQ ✓', true);
     document.getElementById('hqpass').value = '';
   } catch (e) { msg(e.message, false); }
 }
+async function setDevPassword() {
+  const p = document.getElementById('devpass').value;
+  try {
+    await api('POST', '/admin/dev-password', { password: p });
+    msg('تم تعيين كلمة سر حساب المطورين ✓', true);
+    document.getElementById('devpass').value = '';
+  } catch (e) { msg(e.message, false); }
+}
 async function banUser(id, name) {
   if (!confirm(`حظر ${name} من المنصة؟ سيُطرد من جلساته فورًا.`)) return;
-  try { await api('POST', '/api/admin/ban', { user_id: id }); dashTab('admin'); }
+  try { await api('POST', '/admin/ban', { user_id: id }); dashTab('admin'); }
   catch (e) { alert(e.message); }
 }
 async function unbanUser(id) {
-  try { await api('POST', '/api/admin/unban', { user_id: id }); dashTab('admin'); }
+  try { await api('POST', '/admin/unban', { user_id: id }); dashTab('admin'); }
   catch (e) { alert(e.message); }
 }
 async function kickUser(id, name) {
   if (!confirm(`طرد ${name} نهائيًا مع حذف كل محتواه؟ لا يمكن التراجع!`)) return;
-  try { await api('DELETE', `/api/admin/users/${id}`); dashTab('admin'); }
+  try { await api('DELETE', `/admin/users/${id}`); dashTab('admin'); }
   catch (e) { alert(e.message); }
 }
 async function saveProfile() {
@@ -1333,7 +1408,7 @@ function navKey(h) {
   return null;
 }
 async function route() {
-  clearMsgTimer();
+  clearMsgTimer(); clearClock();
   const h = location.hash || '#/';
   renderNav(navKey(h));
   try {

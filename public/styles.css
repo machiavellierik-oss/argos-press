@@ -208,8 +208,8 @@ button{font-family:inherit;cursor:pointer}
 .p-meta b{color:var(--text)}
 .ptabs{display:flex;border-bottom:1px solid var(--line);margin-top:8px;position:sticky;top:0;z-index:30;
   background:rgba(0,0,0,.72);backdrop-filter:blur(14px)}
-.ptab{flex:1;background:none;border:none;color:var(--muted);font-weight:700;font-size:.92rem;
-  padding:14px 6px;position:relative;transition:.2s}
+.ptab{flex:1;background:none;border:none;color:var(--muted);font-weight:700;font-size:1.3rem;
+  padding:10px 4px;position:relative;transition:.2s}
 .ptab:hover{background:var(--hover);color:var(--text)}
 .ptab.active{color:var(--text)}
 .ptab.active::after{content:'';position:absolute;bottom:0;inset-inline:28%;height:4px;border-radius:4px;background:var(--accent)}
@@ -480,3 +480,12 @@ button{font-family:inherit;cursor:pointer}
 .wb-tx b{font-size:15px}
 .wb-tx i{font-style:normal;font-size:12px;color:var(--muted)}
 .wb-go{margin-inline-start:auto;font-size:18px;color:var(--red);font-weight:800}
+/* ساعة أرجوس الرسمية */
+.clock-box{margin:14px 16px;padding:16px;border:1px solid var(--line);border-radius:14px;
+  background:linear-gradient(135deg,#0c1626,#12283f);box-shadow:0 4px 18px rgba(0,0,0,.35)}
+.clock-head{font-weight:800;font-size:1.05rem;margin-bottom:6px}
+.clock-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:.95rem}
+.clock-lbl{color:var(--muted)}
+.clock-game{color:#ffd400;font-size:1.15rem}
+.clock-foot{color:var(--muted);font-size:.82rem;margin-top:8px;line-height:1.7}
+.clock-ctl{display:flex;gap:10px;margin-top:12px}
