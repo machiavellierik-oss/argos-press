@@ -490,3 +490,47 @@ button{font-family:inherit;cursor:pointer}
 .clock-foot{color:var(--muted);font-size:.82rem;margin-top:8px;line-height:1.7}
 .clock-ctl{display:flex;gap:10px;margin-top:12px}
 .clock-ctl .btn{white-space:nowrap}
+
+/* ---------- أحجام الأيقونات الخطّية ---------- */
+.btn svg{width:17px;height:17px;vertical-align:-3px}
+.ptab svg{width:24px;height:24px}
+.e-ic svg{width:46px;height:46px;opacity:.55}
+.empty .e-ic{display:block;margin-bottom:10px}
+.clock-head{display:flex;align-items:center;gap:8px;font-weight:800}
+.clock-head svg{width:22px;height:22px}
+.wb-ic{display:inline-flex}
+.wb-ic svg{width:26px;height:26px}
+.tw-cat svg{width:14px;height:14px;vertical-align:-2px}
+.dos-star{display:inline-flex;color:var(--accent)}
+.dos-star svg{width:18px;height:18px}
+.row-item .grow svg{width:18px;height:18px;vertical-align:-3px}
+.conv-last svg{width:14px;height:14px;vertical-align:-2px}
+.p-meta svg{width:14px;height:14px;vertical-align:-2px}
+.form-dark h2 svg{width:22px;height:22px;vertical-align:-4px}
+.backrow .thead-title svg{width:18px;height:18px}
+.field label svg{width:16px;height:16px;vertical-align:-3px}
+.dot-live{display:inline-block;width:10px;height:10px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e;animation:pulse 1.6s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+/* ---------- بروفايل بأسلوب إنستغرام ---------- */
+.ig{padding:14px 14px 0}
+.ig-top{display:flex;align-items:center;gap:18px}
+.ig-ava{width:84px;height:84px;border-radius:50%;border:2px solid var(--accent);padding:3px;display:flex;align-items:center;justify-content:center;font-size:2.3rem;flex-shrink:0;background:var(--hover);overflow:hidden}
+.ig-ava img{width:100%;height:100%;object-fit:cover;border-radius:50%}
+.ig-stats{flex:1;display:flex;justify-content:space-around;text-align:center}
+.ig-stats b{display:block;font-size:1.15rem}
+.ig-stats span{font-size:.8rem;color:var(--muted)}
+.ig-id{margin-top:10px}
+.ig-name{font-weight:800}
+.ig-handle{color:var(--muted);font-size:.85rem}
+.ig-bio{margin:6px 0;white-space:pre-wrap}
+.ig-meta{display:flex;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:.82rem}
+.ig-meta svg{width:14px;height:14px;vertical-align:-2px}
+.ig-actions{display:flex;gap:8px;margin:12px 0 4px}
+.ig-tabs{display:flex;border-top:1px solid var(--line)}
+.ig-tab{flex:1;background:none;border:none;color:var(--muted);padding:10px;cursor:pointer;border-top:2px solid transparent;margin-top:-1px}
+.ig-tab svg{width:24px;height:24px}
+.ig-tab.active{color:var(--text);border-top-color:var(--text)}
+.ig-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;padding:4px 0 18px}
+.ig-tile{display:block;aspect-ratio:1;overflow:hidden;background:var(--hover)}
+.ig-tile img{width:100%;height:100%;object-fit:cover;display:block}

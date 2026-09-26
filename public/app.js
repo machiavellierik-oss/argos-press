@@ -36,6 +36,35 @@ const ICONS = {
   mail: I('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>'),
   globe: I('<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c3.2 3.6 3.2 14.4 0 18"/><path d="M12 3c-3.2 3.6-3.2 14.4 0 18"/>'),
   dots: I('<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>'),
+  news: I('<path d="M4 6h12a1 1 0 0 1 1 1v11H6a2 2 0 0 1-2-2V6z"/><path d="M17 9h2a1 1 0 0 1 1 1v8a2 2 0 0 1-2 2H6"/><path d="M7.5 10h7M7.5 13.5h7M7.5 17h4"/>'),
+  pen: I('<path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19l-4 1z"/><path d="M14.5 6.5l3 3"/>'),
+  gear: I('<circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v2.8M12 18.7v2.8M2.5 12h2.8M18.7 12h2.8M5.2 5.2l2 2M16.8 16.8l2 2M18.8 5.2l-2 2M7.2 16.8l-2 2"/>'),
+  shield: I('<path d="M12 3l7 3v6c0 4.5-3 7.6-7 9-4-1.4-7-4.5-7-9V6l7-3z"/><path d="M9.3 12l2 2 3.6-4"/>'),
+  refresh: I('<path d="M21 12a9 9 0 1 1-2.6-6.3"/><path d="M21 3v6h-6"/>'),
+  doc: I('<path d="M6 3h8l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v4h4"/><path d="M9 12.5h6M9 16.5h6"/>'),
+  clock: I('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3.5 2"/>'),
+  pin: I('<path d="M12 21.5s-7-6.3-7-11a7 7 0 0 1 14 0c0 4.7-7 11-7 11z"/><circle cx="12" cy="10.5" r="2.5"/>'),
+  medal: I('<circle cx="12" cy="15" r="5"/><path d="M8.6 10.8L5.5 3.5h3.6l2.9 5 2.9-5h3.6l-3.1 7.3"/>'),
+  lock: I('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>'),
+  ban: I('<circle cx="12" cy="12" r="8.5"/><path d="M6 6l12 12"/>'),
+  logout: I('<path d="M14 4H7a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h7"/><path d="M10 12h11M18 8.5L21.5 12 18 15.5"/>'),
+  bell: I('<path d="M6 9.5a6 6 0 0 1 12 0c0 4.5 1.8 5.8 1.8 5.8H4.2S6 14 6 9.5z"/><path d="M10 19.5a2 2 0 0 0 4 0"/>'),
+  send: I('<path d="M21 3L10.5 13.5"/><path d="M21 3l-6.8 18-3.7-7.5L3 9.8 21 3z"/>'),
+  camera: I('<path d="M4 8h3l2-2.5h6L17 8h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/>'),
+  alert: I('<path d="M12 3.5L21.5 20h-19L12 3.5z"/><path d="M12 10v4.5M12 17.5v.5"/>'),
+  x: I('<path d="M6 6l12 12M18 6L6 18"/>'),
+  play: I('<path d="M7 4.5l13 7.5-13 7.5v-15z"/>'),
+  pause: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M9 5v14M15 5v14"/></svg>`,
+  star: I('<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8L3.5 9.7l5.9-.8L12 3.5z"/>'),
+  users: I('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-5.5 6.5-5.5s6.5 2 6.5 5.5"/><path d="M15.5 4.7a3.5 3.5 0 0 1 0 6.6M17.3 14.9c2.2.8 3.7 2.4 3.7 5.1"/>'),
+  grid: I('<rect x="3.5" y="3.5" width="7" height="7" rx="1"/><rect x="13.5" y="3.5" width="7" height="7" rx="1"/><rect x="3.5" y="13.5" width="7" height="7" rx="1"/><rect x="13.5" y="13.5" width="7" height="7" rx="1"/>'),
+  list: I('<path d="M8.5 6H21M8.5 12H21M8.5 18H21"/><circle cx="4.5" cy="6" r="1.3"/><circle cx="4.5" cy="12" r="1.3"/><circle cx="4.5" cy="18" r="1.3"/>'),
+  checkSm: I('<path d="M4.5 12.5l5 5L19.5 7"/>'),
+  bookmark: I('<path d="M7 3.5h10a1 1 0 0 1 1 1V21l-6-4.2L6 21V4.5a1 1 0 0 1 1-1z"/>'),
+  flame: I('<path d="M12 3.5s5.5 4.8 5.5 10a5.5 5.5 0 0 1-11 0c0-2.2 1.1-4.1 1.1-4.1s.5 1.6 2.1 1.6c-1.1-3.2 2.3-7.5 2.3-7.5z"/>'),
+  info: I('<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 7.8v.5"/>'),
+  plus: I('<path d="M12 5v14M5 12h14"/>'),
+  editPen: I('<path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19l-4 1z"/><path d="M14.5 6.5l3 3"/>'),
   check: `<svg class="vbadge" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 2.4 3.4-.5.9 3.3 3 1.7-1.4 3.1 1.4 3.1-3 1.7-.9 3.3-3.4-.5L12 22l-2.4-2.4-3.4.5-.9-3.3-3-1.7L3.7 12 2.3 8.9l3-1.7.9-3.3 3.4.5L12 2z"/><path d="M10.6 14.6l-2.1-2.1-1.4 1.4 3.5 3.5 7-7-1.4-1.4z" fill="#000"/></svg>`,
   checkGold: `<svg class="vbadge gold" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 2.4 3.4-.5.9 3.3 3 1.7-1.4 3.1 1.4 3.1-3 1.7-.9 3.3-3.4-.5L12 22l-2.4-2.4-3.4.5-.9-3.3-3-1.7L3.7 12 2.3 8.9l3-1.7.9-3.3 3.4.5L12 2z"/><path d="M10.6 14.6l-2.1-2.1-1.4 1.4 3.5 3.5 7-7-1.4-1.4z" fill="#000"/></svg>`,
 };
@@ -215,7 +244,7 @@ function articleCardHTML(a) {
   const c = countryOf(a.author.country_code);
   const gold = a.category === 'official';
   return `<article class="acard" data-kind="a" data-id="${a.id}">
-    <span class="tw-cat${gold ? ' gold' : ''}">${gold ? '📜 ' : ''}${esc(a.category_label)}</span>
+    <span class="tw-cat${gold ? ' gold' : ''}">${gold ? ICONS.doc + ' ' : ''}${esc(a.category_label)}</span>
     ${a.image ? `<img class="ac-img" src="${esc(a.image)}" loading="lazy" alt="">` : ''}
     <h3>${esc(a.title)}</h3>
     <p>${esc(excerpt(a.body, 160))}</p>
@@ -323,7 +352,7 @@ async function vHome() {
   app.innerHTML = thead('الرئيسية',
     `<button class="ttab active" data-ht="d">البرقيات</button><button class="ttab" data-ht="a">المقالات</button>`) +
     `<div id="sbar"></div>` + composerHTML()
-    + `<a class="war-banner" href="#/news"><span class="wb-ic">🌍</span><span class="wb-tx"><b>غرفة الحرب</b><i>خريطة الصراع المباشرة وشدة النزاعات</i></span><span class="wb-go">←</span></a>`
+    + `<a class="war-banner" href="#/news"><span class="wb-ic">${ICONS.flame}</span><span class="wb-tx"><b>غرفة الحرب</b><i>خريطة الصراع المباشرة وشدة النزاعات</i></span><span class="wb-go">←</span></a>`
     + `<div id="clockbox"></div>`
     + `<div id="feed"><div class="spin"></div></div>`;
   bindComposer(() => route());
@@ -338,11 +367,11 @@ async function vHome() {
       if (kind === 'd') {
         const items = await api('GET', '/dispatches?limit=30');
         feed.innerHTML = items.length ? items.map(tweetHTML).join('')
-          : `<div class="empty"><span class="e-ic">📜</span>لا توجد برقيات بعد — كن أول من يصرّح باسم دولته.</div>`;
+          : `<div class="empty"><span class="e-ic">${ICONS.news}</span>لا توجد برقيات بعد — كن أول من يصرّح باسم دولته.</div>`;
       } else {
         const items = await api('GET', '/articles?limit=20');
         feed.innerHTML = items.length ? items.map(articleCardHTML).join('')
-          : '<div class="empty"><span class="e-ic">📰</span>لا توجد مقالات بعد.</div>';
+          : '<div class="empty"><span class="e-ic">' + ICONS.doc + '</span>لا توجد مقالات بعد.</div>';
       }
       bindFeed(); hydrateEngagement(kind === 'd' ? 'dispatch' : 'article');
     } catch (e) { feed.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
@@ -359,7 +388,7 @@ async function vDispatches() {
   try {
     const items = await api('GET', '/dispatches?limit=40');
     document.getElementById('feed').innerHTML = items.length ? items.map(tweetHTML).join('')
-      : '<div class="empty"><span class="e-ic">📜</span>لا توجد برقيات بعد.</div>';
+      : '<div class="empty"><span class="e-ic">' + ICONS.news + '</span>لا توجد برقيات بعد.</div>';
     bindFeed(); hydrateEngagement('dispatch');
   } catch (e) { document.getElementById('feed').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
@@ -370,7 +399,7 @@ async function vCat(cat) {
   try {
     const items = await api('GET', `/articles?category=${cat}&limit=30`);
     document.getElementById('feed').innerHTML = items.length ? items.map(articleCardHTML).join('')
-      : '<div class="empty"><span class="e-ic">📰</span>لا توجد مواد في هذا القسم بعد.</div>';
+      : '<div class="empty"><span class="e-ic">' + ICONS.doc + '</span>لا توجد مواد في هذا القسم بعد.</div>';
     bindFeed(); hydrateEngagement('article');
   } catch (e) { document.getElementById('feed').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
@@ -399,21 +428,21 @@ async function mountClock(el) {
   const tick = () => {
     if (!document.body.contains(el)) { clearClock(); return; }
     const now = Date.now();
-    let game = '—', status = '⏸️ الساعة متوقفة — بانتظار تشغيل المطورين';
+    let game = '—', status = ICONS.pause + ' الساعة متوقفة — بانتظار تشغيل المطورين';
     if (clockState && clockState.running && clockState.started_at) {
       const g = gameDateOf(clockState.started_at, now);
       game = `${g.day} ${AR_MONTHS[g.month - 1]} ${g.year}`;
-      status = '🟢 اللعبة جارية';
+      status = '<span class="dot-live"></span> اللعبة جارية';
     }
     el.innerHTML = `<div class="clock-box">
-      <div class="clock-head">🕰️ ساعة أرجوس الرسمية</div>
+      <div class="clock-head">${ICONS.clock} ساعة أرجوس الرسمية</div>
       <div class="clock-row"><span class="clock-lbl">العالم الواقعي (غرينتش)</span><b>${fmtGMT(now)}</b></div>
       <div class="clock-row"><span class="clock-lbl">زمن اللعبة</span><b class="clock-game">${game}</b></div>
       <div class="clock-foot">${status} · كل 24 ساعة واقعية = سنة كاملة داخل اللعبة</div>
       ${me && me.role === 'developer' ? `<div class="clock-ctl">
-        <button class="btn" style="width:auto;padding:8px 22px" onclick="clockStart()">▶ تشغيل الساعة</button>
-        <button class="btn ghost" style="width:auto;padding:8px 22px" onclick="clockStop()">⏸ إيقاف</button>
-        <button class="btn danger" style="width:auto;padding:8px 22px" onclick="clockReset()">↺ إعادة التعيين</button>
+        <button class="btn" style="width:auto;padding:8px 22px" onclick="clockStart()">${ICONS.play} تشغيل الساعة</button>
+        <button class="btn ghost" style="width:auto;padding:8px 22px" onclick="clockStop()">${ICONS.pause} إيقاف</button>
+        <button class="btn danger" style="width:auto;padding:8px 22px" onclick="clockReset()">${ICONS.refresh} إعادة التعيين</button>
       </div>` : ''}
     </div>`;
   };
@@ -704,7 +733,7 @@ function initGlobeFallback(cv, rows) {
 function renderWarTable(rows) {
   const el = document.getElementById('wtable'); if (!el) return;
   if (!rows.length) {
-    el.innerHTML = '<div class="empty"><span class="e-ic">🌍</span>لا توجد تقارير بعد — كن أول من يشعل مسرح العمليات.</div>';
+    el.innerHTML = '<div class="empty"><span class="e-ic">' + ICONS.flame + '</span>لا توجد تقارير بعد — كن أول من يشعل مسرح العمليات.</div>';
     return;
   }
   el.innerHTML = `<div class="war-table">` + rows.map((r) => `
@@ -784,7 +813,7 @@ async function vDossiers() {
           <span class="status-badge ${esc(d.status)}" style="margin-inline-start:8px">${STATUS_AR[d.status] || d.status}</span><br>
           <span class="dc-s">${d.alias ? `«${esc(d.alias)}» · ` : ''}${c.flag} ${esc(c.name)} · <span dir="ltr">${esc(d.clearance)}</span></span></span>
         <span class="hint">←</span></div>`;
-    }).join('') : '<div class="empty"><span class="e-ic">🗂️</span>لا توجد ملفات بعد — سيظهر ملف كل لاعب هنا فور تسجيله.</div>';
+    }).join('') : '<div class="empty"><span class="e-ic">' + ICONS.folder + '</span>لا توجد ملفات بعد — سيظهر ملف كل لاعب هنا فور تسجيله.</div>';
   } catch (e) { document.querySelector('.dos-list').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 async function vDossier(username) {
@@ -798,7 +827,7 @@ async function vDossier(username) {
   const isMine = me && me.username === user.username;
   const theaters = (d.theaters || []).map((t) => { const cc = countryOf(t); return `<div class="dos-row"><span class="dos-flag">${cc.flag}</span><span>${esc(cc.name)}</span></div>`; }).join('');
   const roles = (d.roles || []).map((x) => `<div class="dos-row"><span class="dos-bullet">▸</span><span>${esc(x)}</span></div>`).join('');
-  const ach = (d.achievements || []).map((x) => `<div class="dos-row ach-row"><span class="dos-star">★</span><span>${esc(x)}</span></div>`).join('');
+  const ach = (d.achievements || []).map((x) => `<div class="dos-row ach-row"><span class="dos-star">${ICONS.medal}</span></span><span>${esc(x)}</span></div>`).join('');
   const skills = Object.entries(SKILLS).map(([k, label]) => {
     const v = Number(d.skills[k]) || 0;
     return `<div class="dos-skill"><span>${label}</span><span class="dos-dots" dir="ltr">${dots(v)}</span></div>`;
@@ -901,32 +930,36 @@ async function vDash() {
   const mine_d = disps.filter((d) => d.author.username === me.username).length;
   app.innerHTML = `
     <div class="backrow"><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
-      <div><div class="thead-title" style="padding:0">${esc(me.username)}</div>
-      <div class="hint">${mine_d} برقية · ${mine_a} مقال</div></div></div>
-    <div class="cover"></div>
-    <div class="prow">
-      <div class="p-av">${me.avatar ? `<img src="${esc(me.avatar)}">` : c.flag}</div>
-      <div class="p-head"><div class="p-id">
-        <div class="p-name">${esc(c.name)} ${me.role === 'admin' ? ICONS.checkGold : ICONS.check}</div>
-        <div class="p-handle">@${esc(me.username)}</div></div>
-        <span style="display:flex;gap:8px">
-          <a class="btn ghost" href="#/u/${esc(me.username)}" style="width:auto;padding:8px 16px">بروفايلي</a>
-          <button class="btn ghost" id="logoutBtn" style="width:auto;padding:8px 16px">خروج</button>
-        </span>
+      <div class="thead-title" style="padding:0;display:flex;align-items:center;gap:6px">${esc(me.username)} ${me.role === 'admin' ? ICONS.checkGold : ICONS.check}</div></div>
+    <div class="ig">
+      <div class="ig-top">
+        <div class="ig-ava">${me.avatar ? `<img src="${esc(me.avatar)}">` : c.flag}</div>
+        <div class="ig-stats">
+          <div><b>${mine_d}</b><span>برقية</span></div>
+          <div><b>${mine_a}</b><span>مقال</span></div>
+          <div><b>${disps.filter((d) => d.author.username === me.username && d.image).length + arts.filter((a) => a.author.username === me.username && a.image).length}</b><span>صورة</span></div>
+        </div>
       </div>
-      <p class="p-bio">${me.bio ? esc(me.bio) : `${c.flag} الحساب الرسمي لدولة ${esc(c.name)} في محاكاة أرجوس للتاريخ — 1900.`}</p>
-      <div class="p-meta"><span>📍 ${esc(c.name)}</span><span>🗓️ انضم ${timeAgo(me.created_at || Date.now())}</span>
-        ${staff ? '<span>⭐ إدارة المقر</span>' : ''}</div>
-      <div class="p-meta"><span><b>${mine_d}</b> برقية</span><span><b>${mine_a}</b> مقال</span></div>
+      <div class="ig-id">
+        <div class="ig-name">${esc(c.name)}</div>
+        <div class="ig-handle">@${esc(me.username)}</div>
+        <p class="ig-bio">${me.bio ? esc(me.bio) : `${c.flag} الحساب الرسمي لدولة ${esc(c.name)} في محاكاة أرجوس للتاريخ — 1900.`}</p>
+        <div class="ig-meta"><span>${ICONS.pin} ${esc(c.name)}</span><span>${ICONS.cal} انضم ${timeAgo(me.created_at || Date.now())}</span>
+          ${staff ? `<span>${ICONS.star} إدارة المقر</span>` : ''}${me.role === 'developer' ? `<span>${ICONS.zap} المطورون</span>` : ''}</div>
+      </div>
+      <div class="ig-actions">
+        <a class="btn ghost" href="#/u/${esc(me.username)}" style="flex:1">بروفايلي العام</a>
+        <button class="btn ghost" id="logoutBtn" style="flex:1">${ICONS.logout} خروج</button>
+      </div>
     </div>
     <div class="ptabs">
-      <button class="ptab active" data-pt="feed" title="منشوراتي">🗞️</button>
-      <button class="ptab" data-pt="new-d" title="برقية جديدة">✍️</button>
-      ${staff ? '<button class="ptab" data-pt="new-a" title="مقال جديد">🖋️</button>' : ''}
-      <button class="ptab" data-pt="edit" title="تعديل البروفايل">⚙️</button>
-      <button class="ptab" data-pt="dossier" title="ملفي الاستخباراتي">🗂️</button>
-      ${canSwitch ? '<button class="ptab" data-pt="switch" title="تبديل الحسابات">🔄</button>' : ''}
-      ${hqAccess ? '<button class="ptab" data-pt="admin" title="إدارة المنصة">🛡️</button>' : ''}
+      <button class="ptab active" data-pt="feed" title="منشوراتي">${ICONS.news}</button>
+      <button class="ptab" data-pt="new-d" title="برقية جديدة">${ICONS.pen}</button>
+      ${staff ? `<button class="ptab" data-pt="new-a" title="مقال جديد">${ICONS.doc}</button>` : ''}
+      <button class="ptab" data-pt="edit" title="تعديل البروفايل">${ICONS.gear}</button>
+      <button class="ptab" data-pt="dossier" title="ملفي الاستخباراتي">${ICONS.folder}</button>
+      ${canSwitch ? `<button class="ptab" data-pt="switch" title="تبديل الحسابات">${ICONS.refresh}</button>` : ''}
+      ${hqAccess ? `<button class="ptab" data-pt="admin" title="إدارة المنصة">${ICONS.shield}</button>` : ''}
     </div>
     <div id="pbody"></div>`;
   const tabs = app.querySelectorAll('[data-pt]');
@@ -949,9 +982,9 @@ async function dashTab(t) {
     const mine_a = arts.filter((a) => a.author.username === me.username);
     const mine_d = disps.filter((d) => d.author.username === me.username);
     body.innerHTML = `<div class="sec-h">مقالاتي (${mine_a.length})</div>` +
-      (mine_a.map((a) => rowItem(`📰 ${esc(a.title)} · ${timeAgo(a.created_at)}`, `delArticle(${a.id})`)).join('') || '<p class="hint" style="padding:0 18px">لا توجد مقالات.</p>') +
+      (mine_a.map((a) => rowItem(`${ICONS.doc} ${esc(a.title)} · ${timeAgo(a.created_at)}`, `delArticle(${a.id})`)).join('') || '<p class="hint" style="padding:0 18px">لا توجد مقالات.</p>') +
       `<div class="sec-h">برقياتي (${mine_d.length})</div>` +
-      (mine_d.map((d) => rowItem(`📜 ${esc(excerpt(d.body, 70))}`, `delDispatch(${d.id})`)).join('') || '<p class="hint" style="padding:0 18px">لا توجد برقيات.</p>');
+      (mine_d.map((d) => rowItem(`${ICONS.news} ${esc(excerpt(d.body, 70))}`, `delDispatch(${d.id})`)).join('') || '<p class="hint" style="padding:0 18px">لا توجد برقيات.</p>');
   } else if (t === 'new-d') {
     const c = countryOf(me.country_code);
     body.innerHTML = `<div class="form-dark"><h2>برقية جديدة باسم ${c.flag} ${esc(c.name)}</h2><div id="msg"></div>
@@ -1035,14 +1068,14 @@ function getSavedAccounts() {
 function saveAccounts(list) { localStorage.setItem('argos_switch', JSON.stringify(list)); }
 function renderSwitchTab(body) {
   const list = getSavedAccounts();
-  body.innerHTML = `<div class="form-dark"><h2>🔄 تبديل الحسابات</h2>
+  body.innerHTML = `<div class="form-dark"><h2>${ICONS.refresh} تبديل الحسابات</h2>
     <p class="hint">احفظ حساباتك هنا وانتقل بينها بضغطة واحدة.</p>
     <div>` + (list.length ? list.map((a, i) => `
-      <div class="row-item"><span class="grow">👤 ${esc(a.username)}${a.username === me.username ? ' <b>(الحالي)</b>' : ''}</span>
+      <div class="row-item"><span class="grow">${ICONS.user} ${esc(a.username)}${a.username === me.username ? ' <b>(الحالي)</b>' : ''}</span>
       ${a.username === me.username ? '' : `<button class="btn" style="width:auto;padding:8px 18px" onclick="switchToAccount(${i})">دخول</button>`}
       <button class="btn ghost" style="width:auto;padding:8px 14px" onclick="removeAccount(${i})">✕</button></div>`).join('')
       : '<p class="hint">لا توجد حسابات محفوظة بعد.</p>') + `</div>
-    <button class="btn" style="width:auto;padding:12px 32px;margin-top:12px" onclick="saveCurrentAccount()">💾 حفظ الحساب الحالي (@${esc(me.username)})</button>
+    <button class="btn" style="width:auto;padding:12px 32px;margin-top:12px" onclick="saveCurrentAccount()">${ICONS.bookmark} حفظ الحساب الحالي (@${esc(me.username)})</button>
   </div>`;
 }
 async function saveCurrentAccount() {
@@ -1068,7 +1101,7 @@ async function renderAdminTab(body) {
   let users = [];
   try { users = await api('GET', '/admin/users'); }
   catch (e) { body.innerHTML = `<div class="form-dark"><div class="err">${esc(e.message)}</div></div>`; return; }
-  body.innerHTML = `<div class="form-dark"><h2>🛡️ إدارة المنصة</h2>
+  body.innerHTML = `<div class="form-dark"><h2>${ICONS.shield} إدارة المنصة</h2>
     <div class="sec-h">حساب argos HQ</div>
     <p class="hint">البريد: <b dir="ltr">hq@argos.internal</b> — عيّن كلمة السر ثم سجّل الدخول به من صفحة الدخول، واحفظه في «تبديل الحسابات».</p>
     <div id="msg"></div>
@@ -1083,14 +1116,14 @@ async function renderAdminTab(body) {
     <div class="sec-h" style="margin-top:18px">المستخدمون (${users.length})</div>
     <div>` + (users.map((u) => {
       const c = countryOf(u.country_code);
-      const roleTag = u.role === 'admin' ? ' · ⭐ أدمن' : u.role === 'developer' ? ' · 🛠️ المطورون' : '';
+      const roleTag = u.role === 'admin' ? ` · ${ICONS.star} أدمن` : u.role === 'developer' ? ` · ${ICONS.zap} المطورون` : '';
       const actions = u.role === 'developer'
-        ? '<span class="hint">🛠️ حساب المطورين — محمي من الحظر والطرد</span>'
+        ? `<span class="hint">${ICONS.zap} حساب المطورين — محمي من الحظر والطرد</span>`
         : (u.banned
           ? `<button class="btn" style="width:auto;padding:8px 14px" onclick="unbanUser(${u.id})">إلغاء الحظر</button>`
-          : `<button class="btn danger" style="width:auto;padding:8px 14px" onclick="banUser(${u.id},'${esc(u.username)}')">حظر</button>`)
-          + `<button class="btn danger" style="width:auto;padding:8px 14px" onclick="kickUser(${u.id},'${esc(u.username)}')">طرد</button>`;
-      return `<div class="row-item"><span class="grow">${c.flag} <b>${esc(u.username)}</b> <span class="hint">${esc(c.name)}${roleTag}${u.banned ? ' · ⛔ محظور' : ''}</span></span>${actions}</div>`;
+          : `<button class="btn danger" style="width:auto;padding:8px 14px" onclick="banUser(${u.id},'${esc(u.username)}')">${ICONS.ban} حظر</button>`)
+          + `<button class="btn danger" style="width:auto;padding:8px 14px" onclick="kickUser(${u.id},'${esc(u.username)}')">${ICONS.trash} طرد</button>`;
+      return `<div class="row-item"><span class="grow">${c.flag} <b>${esc(u.username)}</b> <span class="hint">${esc(c.name)}${roleTag}${u.banned ? ` · ${ICONS.ban} محظور` : ''}</span></span>${actions}</div>`;
     }).join('') || '<p class="hint">لا يوجد مستخدمون.</p>') + `</div></div>`;
 }
 async function setHqPassword() {
@@ -1156,7 +1189,7 @@ async function vDashDossier(body) {
       <div class="check-grid">${COUNTRIES.map((x) => `<label><input type="checkbox" class="fth" value="${x.code}"${th.has(x.code) ? ' checked' : ''}> ${x.flag} ${esc(x.name)}</label>`).join('')}</div></div>
     <div class="field"><label>المناصب والخدمات (سطر لكل منصب)</label>
       <textarea id="froles" placeholder="مثال: رئيس وزراء بريطانيا">${esc((d.roles || []).join('\n'))}</textarea></div>
-    <div class="field"><label>🏆 الإنجازات (سطر لكل إنجاز)</label>
+    <div class="field"><label>${ICONS.medal} الإنجازات (سطر لكل إنجاز)</label>
       <textarea id="fach" placeholder="مثال: قاد حملة البلقان بنجاح سنة 1901">${esc((d.achievements || []).join('\n'))}</textarea></div>
     <div class="field"><label>مصفوفة المهارات (Skill Matrix)</label>
       <div class="dos-skills-edit">${Object.entries(SKILLS).map(([k, label]) => `
@@ -1271,7 +1304,7 @@ function openStoryAdd() {
       <input type="file" id="simg" accept="image/*" style="display:none">
       <button class="c-post" id="spost" style="margin-inline-start:auto">نشر الستوري</button>
     </div>
-    <p class="hint">الستوري يختفي تلقائيًا بعد 24 ساعة ⏳</p>
+    <p class="hint">الستوري يختفي تلقائيًا بعد 24 ساعة</p>
   </div>`;
   document.body.appendChild(ov);
   const m = (t, ok) => { ov.querySelector('.m-msg').innerHTML = t ? `<div class="${ok ? 'okmsg' : 'err'}">${esc(t)}</div>` : ''; };
@@ -1360,49 +1393,68 @@ async function vUser(username) {
     const { user, stats } = await api('GET', '/user/' + encodeURIComponent(username));
     const c = countryOf(user.country_code);
     const isMine = me && me.username === user.username;
+    const badge = user.role === 'admin' ? ICONS.checkGold : user.role !== 'player' ? ICONS.check : '';
+    let ds = [], as = [];
+    try {
+      const [dAll, aAll] = await Promise.all([
+        api('GET', '/dispatches?limit=100'), api('GET', '/articles?limit=100'),
+      ]);
+      ds = dAll.filter((d) => d.author.username === username);
+      as = aAll.filter((a) => a.author.username === username);
+    } catch (e) {}
+    const pics = [
+      ...ds.filter((d) => d.image).map((d) => ({ kind: 'd', id: d.id, image: d.image, ts: d.created_at })),
+      ...as.filter((a) => a.image).map((a) => ({ kind: 'a', id: a.id, image: a.image, ts: a.created_at })),
+    ].sort((x, y) => y.ts - x.ts);
     app.innerHTML = `
       <div class="backrow"><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
-        <div><div class="thead-title" style="padding:0">${esc(user.username)}</div>
-        <div class="hint">${stats.dispatches} برقية · ${stats.articles} مقال</div></div></div>
-      <div class="cover"></div>
-      <div class="prow">
-        <div class="p-av">${c.flag}</div>
-        <div class="p-head"><div class="p-id">
-          <div class="p-name">${esc(c.name)} ${user.role === 'admin' ? ICONS.checkGold : ICONS.check}</div>
-          <div class="p-handle">@${esc(user.username)}</div></div>
-          ${isMine ? `<a class="btn ghost" href="#/dash" style="width:auto;padding:8px 18px">تعديل</a>`
-            : `<a class="btn ghost" href="#/dossier/${esc(user.username)}" style="width:auto;padding:8px 18px">🗂️ الملف الاستخباراتي</a>`}
+        <div class="thead-title" style="padding:0;display:flex;align-items:center;gap:6px">${esc(user.username)} ${badge}</div></div>
+      <div class="ig">
+        <div class="ig-top">
+          <div class="ig-ava">${user.avatar ? `<img src="${esc(user.avatar)}" alt="">` : c.flag}</div>
+          <div class="ig-stats">
+            <div><b>${stats.dispatches}</b><span>برقية</span></div>
+            <div><b>${stats.articles}</b><span>مقال</span></div>
+            <div><b>${pics.length}</b><span>صورة</span></div>
+          </div>
         </div>
-        ${user.bio ? `<p class="p-bio">${esc(user.bio)}</p>`
-          : isMine ? `<p class="p-bio" style="opacity:.5">أضف نبذة تعريفية (بايو) من حسابك…</p>` : ''}
-        <div class="p-meta"><span>📍 ${esc(c.name)}</span><span>🗓️ انضم ${timeAgo(user.created_at)}</span>
-          ${user.role === 'admin' ? '<span>⭐ إدارة المقر</span>' : ''}</div>
-        <div class="p-meta"><span><b>${stats.dispatches}</b> برقية</span><span><b>${stats.articles}</b> مقال</span></div>
-      </div>
-      <div class="ptabs">
-        <button class="ptab active" data-pt="d">البرقيات</button>
-        <button class="ptab" data-pt="a">المقالات</button>
-      </div>
-      <div id="pfeed"><div class="spin"></div></div>`;
+        <div class="ig-id">
+          <div class="ig-name">${esc(c.name)}</div>
+          <div class="ig-handle">@${esc(user.username)}</div>
+          ${user.bio ? `<p class="ig-bio">${esc(user.bio)}</p>`
+            : isMine ? `<p class="ig-bio" style="opacity:.5">أضف نبذة تعريفية (بايو) من حسابك…</p>` : ''}
+          <div class="ig-meta"><span>${ICONS.pin} ${esc(c.name)}</span><span>${ICONS.cal} انضم ${timeAgo(user.created_at)}</span>
+            ${user.role === 'admin' ? `<span>${ICONS.star} إدارة المقر</span>` : ''}${user.role === 'developer' ? `<span>${ICONS.zap} المطورون</span>` : ''}</div>
+        </div>
+        <div class="ig-actions">
+          ${isMine ? `<a class="btn" href="#/dash" style="flex:1">تعديل البروفايل</a>`
+            : `${me ? `<a class="btn" href="#/messages/${esc(user.username)}" style="flex:1">${ICONS.send} مراسلة</a>` : ''}
+               <a class="btn ghost" href="#/dossier/${esc(user.username)}" style="flex:1">${ICONS.folder} الملف الاستخباراتي</a>`}
+        </div>
+        <div class="ig-tabs">
+          <button class="ig-tab active" data-pt="grid" title="الصور">${ICONS.grid}</button>
+          <button class="ig-tab" data-pt="list" title="المنشورات">${ICONS.list}</button>
+        </div>
+        <div id="pfeed"></div>
+      </div>`;
     const tabs = app.querySelectorAll('[data-pt]');
     const load = async (kind) => {
       tabs.forEach((t) => t.classList.toggle('active', t.dataset.pt === kind));
       const feed = document.getElementById('pfeed');
+      if (kind === 'grid') {
+        feed.innerHTML = pics.length ? `<div class="ig-grid">${pics.map((p) =>
+          `<a class="ig-tile" href="${p.kind === 'd' ? '#/d/' + p.id : '#/article/' + p.id}"><img src="${esc(p.image)}" loading="lazy" alt=""></a>`
+        ).join('')}</div>` : '<div class="empty">لا توجد صور بعد.</div>';
+        return;
+      }
       feed.innerHTML = '<div class="spin"></div>';
-      try {
-        if (kind === 'd') {
-          const items = (await api('GET', '/dispatches?limit=100')).filter((d) => d.author.username === username);
-          feed.innerHTML = items.length ? items.map(tweetHTML).join('') : '<div class="empty">لا توجد برقيات.</div>';
-          bindFeed(); hydrateEngagement('dispatch');
-        } else {
-          const items = (await api('GET', '/articles?limit=100')).filter((a) => a.author.username === username);
-          feed.innerHTML = items.length ? items.map(articleCardHTML).join('') : '<div class="empty">لا توجد مقالات.</div>';
-          bindFeed(); hydrateEngagement('article');
-        }
-      } catch (e) { feed.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+      const mixed = [...ds.map((d) => ({ ts: d.created_at, h: tweetHTML(d) })), ...as.map((a) => ({ ts: a.created_at, h: articleCardHTML(a) }))]
+        .sort((x, y) => y.ts - x.ts);
+      feed.innerHTML = mixed.length ? mixed.map((x) => x.h).join('') : '<div class="empty">لا توجد منشورات.</div>';
+      bindFeed(); hydrateEngagement('dispatch'); hydrateEngagement('article');
     };
     tabs.forEach((t) => t.onclick = () => load(t.dataset.pt));
-    await load('d');
+    await load('grid');
   } catch (e) { app.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 
@@ -1468,7 +1520,7 @@ async function vMessages() {
         <a class="conv" href="#/messages/${esc(cv.user.username)}">
           ${avHTML(cv.user, 52)}
           <span class="conv-tx"><span class="conv-top"><b class="conv-name">${esc(cv.user.username)}</b><span class="tw-handle">${timeAgo(cv.last.created_at)}</span></span>
-          <span class="conv-last">${cv.last.mine ? 'أنت: ' : ''}${cv.last.image ? '📷 صورة' : esc(excerpt(cv.last.body, 55))}</span></span>
+          <span class="conv-last">${cv.last.mine ? 'أنت: ' : ''}${cv.last.image ? ICONS.camera + ' صورة' : esc(excerpt(cv.last.body, 55))}</span></span>
           ${cv.unread ? `<span class="unread">${cv.unread}</span>` : ''}
         </a>`).join('')
         : '<div class="empty"><span class="e-ic">✉️</span>لا توجد محادثات بعد.<br>ابدأ رسالة جديدة وتحدث مع اللاعبين.</div>';
@@ -1544,7 +1596,7 @@ async function vThread(username) {
         ${avHTML(d.user, 40)}<span class="th-un"><b>${esc(d.user.username)}</b><span class="tw-handle">${esc(countryOf(d.user.country_code).name)}</span></span></a>`;
       const msgs = d.messages || [];
       if (first || (msgs.length && msgs[msgs.length - 1].id !== lastId)) {
-        thread.innerHTML = msgs.length ? msgs.map(bHTML).join('') : '<div class="empty">ابدأ المحادثة 👋</div>';
+        thread.innerHTML = msgs.length ? msgs.map(bHTML).join('') : '<div class="empty">ابدأ المحادثة</div>';
         lastId = msgs.length ? msgs[msgs.length - 1].id : 0;
         scroll();
       }
@@ -1592,7 +1644,7 @@ async function boot(first = true) {
       await route();
     } else { await route(); }
   } catch (e) {
-    app.innerHTML = `<div class="empty"><span class="e-ic">⚠️</span>تعذّر الاتصال بالخادم.<br>${esc(e.message)}</div>`;
+    app.innerHTML = `<div class="empty"><span class="e-ic">${ICONS.alert}</span>تعذّر الاتصال بالخادم.<br>${esc(e.message)}</div>`;
   }
 }
 boot();
