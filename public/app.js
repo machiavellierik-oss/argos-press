@@ -170,15 +170,17 @@ async function doLogin() {
     me = (await api('GET', '/me')).user; renderTop(); location.hash = '#/';
   } catch (e) { msg(e.message, false); }
 }
-function vRegister() {
+async function vRegister() {
+  let taken = [];
+  try { taken = await api('GET', '/taken-countries'); } catch (e) {}
   app.innerHTML = `<div class="form"><h2>إنشاء حساب لاعب</h2><div id="msg"></div>
     <div class="field"><label>اسم المستخدم</label><input id="username" dir="ltr" placeholder="مثال: napoleon_1900">
       <div class="hint">أحرف إنجليزية وأرقام و _ فقط (3-20)</div></div>
     <div class="field"><label>البريد الإلكتروني</label><input id="email" type="email" dir="ltr"></div>
     <div class="field"><label>كلمة المرور</label><input id="password" type="password"><div class="hint">6 أحرف على الأقل</div></div>
     <div class="field"><label>الدولة التي ستلعب بها</label><select id="country">
-      ${COUNTRIES.map((c) => `<option value="${c.code}">${c.flag} ${c.name}</option>`).join('')}</select>
-      <div class="hint">ستظهر كل منشوراتك وبرقياتك باسم هذه الدولة</div></div>
+      ${COUNTRIES.map((c) => `<option value="${c.code}"${taken.includes(c.code) ? ' disabled' : ''}>${c.flag} ${c.name}${taken.includes(c.code) ? ' — محجوزة' : ''}</option>`).join('')}</select>
+      <div class="hint">كل دولة يحجزها لاعب واحد فقط — الدول المحجوزة تظهر معطّلة</div></div>
     <button class="btn" onclick="doRegister()">إنشاء الحساب</button></div>`;
 }
 async function doRegister() {
@@ -276,7 +278,7 @@ async function route() {
     else if (h.startsWith('#/article/')) await vArticle(h.split('/')[2]);
     else if (h === '#/dispatches') await vDispatches();
     else if (h === '#/login') vLogin();
-    else if (h === '#/register') vRegister();
+    else if (h === '#/register') await vRegister();
     else if (h === '#/dash') await vDash();
     else await vHome();
   } catch (e) { app.innerHTML = `<p class="empty">${esc(e.message)}</p>`; }

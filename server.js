@@ -144,6 +144,12 @@ const cleanImage = (v) => (typeof v === 'string' && v.startsWith('/uploads/') ? 
 // ---------- الدول ----------
 app.get('/api/countries', (req, res) => res.json(COUNTRIES));
 
+// الدول المحجوزة من طرف لاعبين (لمنع تكرار اختيار نفس الدولة)
+app.get('/api/taken-countries', (req, res) => {
+  const rows = db.prepare("SELECT DISTINCT country_code FROM users WHERE role!='system'").all();
+  res.json(rows.map((r) => r.country_code));
+});
+
 // ---------- الحسابات ----------
 app.post('/api/register', (req, res) => {
   const { username, email, password, country_code } = req.body || {};
@@ -157,6 +163,8 @@ app.post('/api/register', (req, res) => {
     return res.status(400).json({ error: 'اختر الدولة التي ستلعب بها' });
   const dup = db.prepare('SELECT id FROM users WHERE username=? OR email=?').get(username, email);
   if (dup) return res.status(409).json({ error: 'اسم المستخدم أو البريد مسجّل مسبقًا' });
+  const taken = db.prepare("SELECT username FROM users WHERE country_code=? AND role!='system'").get(country_code);
+  if (taken) return res.status(409).json({ error: 'هذه الدولة محجوزة مسبقًا من طرف لاعب آخر — اختر دولة أخرى' });
 
   const hash = bcrypt.hashSync(password, 10);
   const others = db.prepare("SELECT COUNT(*) AS c FROM users WHERE role!='system'").get().c;
