@@ -34,6 +34,7 @@ const ICONS = {
   img: I('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 18l5-5 3 3 4-4 4 4"/>'),
   back: I('<path d="M19 12H5M11 6l-6 6 6 6"/>'),
   mail: I('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>'),
+  globe: I('<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c3.2 3.6 3.2 14.4 0 18"/><path d="M12 3c-3.2 3.6-3.2 14.4 0 18"/>'),
   dots: I('<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>'),
   check: `<svg class="vbadge" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 2.4 3.4-.5.9 3.3 3 1.7-1.4 3.1 1.4 3.1-3 1.7-.9 3.3-3.4-.5L12 22l-2.4-2.4-3.4.5-.9-3.3-3-1.7L3.7 12 2.3 8.9l3-1.7.9-3.3 3.4.5L12 2z"/><path d="M10.6 14.6l-2.1-2.1-1.4 1.4 3.5 3.5 7-7-1.4-1.4z" fill="#000"/></svg>`,
   checkGold: `<svg class="vbadge gold" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 2.4 3.4-.5.9 3.3 3 1.7-1.4 3.1 1.4 3.1-3 1.7-.9 3.3-3.4-.5L12 22l-2.4-2.4-3.4.5-.9-3.3-3-1.7L3.7 12 2.3 8.9l3-1.7.9-3.3 3.4.5L12 2z"/><path d="M10.6 14.6l-2.1-2.1-1.4 1.4 3.5 3.5 7-7-1.4-1.4z" fill="#000"/></svg>`,
@@ -120,6 +121,7 @@ const NAV = [
   ['#/cat/war', 'سيناريوهات الحروب', 'zap'],
   ['#/cat/events', 'أحداث اللعبة', 'cal'],
   ['#/dossiers', 'ملفات العملاء', 'folder'],
+  ['#/news', 'غرفة الحرب', 'globe'],
 ];
 function renderNav(active) {
   const nav = document.getElementById('mainnav');
@@ -366,6 +368,128 @@ async function vCat(cat) {
       : '<div class="empty"><span class="e-ic">📰</span>لا توجد مواد في هذا القسم بعد.</div>';
     bindFeed(); hydrateEngagement('article');
   } catch (e) { document.getElementById('feed').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+// ---------- غرفة الحرب (خريطة الصراع) ----------
+const SEV_AR = { RED: 'مرتفع', ORANGE: 'متوسط', YELLOW: 'منخفض' };
+const TREND_AR = { up: 'متصاعد', down: 'متراجع', steady: 'مستقر' };
+async function vNews() {
+  app.innerHTML = thead('غرفة الحرب')
+    + `<div class="war-hero">
+        <canvas id="wglobe"></canvas>
+        <div class="war-hero-tx">
+          <div class="war-kicker">خريطة الصراع المباشرة</div>
+          <h2>مسرح عمليات أرجوس</h2>
+          <p>رصد حي لنشاط الدول — البرقيات والبيانات والتقارير الحربية خلال آخر 30 يومًا.</p>
+          <div class="war-legend">
+            <span><i class="dot" style="background:#f4212e"></i>مرتفع</span>
+            <span><i class="dot" style="background:#ff9f0a"></i>متوسط</span>
+            <span><i class="dot" style="background:#ffd400"></i>منخفض</span>
+          </div>
+        </div>
+      </div>
+      <div class="war-sec"><div class="war-sec-t">شدة الصراع — نافذة 30 يومًا</div><div id="wtable"><div class="spin"></div></div></div>
+      <div class="war-sec"><div class="war-sec-t">الموجز اليومي</div><div id="wbriefs"><div class="spin"></div></div></div>`;
+  let rows = [];
+  try { const d = await api('GET', '/conflict'); rows = d.rows || []; }
+  catch (e) { /* يبقى فارغًا */ }
+  initGlobe(rows);
+  renderWarTable(rows);
+  renderBriefs(rows);
+}
+function initGlobe(rows) {
+  const cv = document.getElementById('wglobe'); if (!cv) return;
+  const ctx = cv.getContext('2d');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  let W = 0, H = 0, R = 0;
+  const fit = () => {
+    const r = cv.getBoundingClientRect();
+    W = cv.width = Math.max(1, r.width * dpr); H = cv.height = Math.max(1, r.height * dpr);
+    R = Math.min(W, H) * 0.40;
+  };
+  fit(); window.addEventListener('resize', fit);
+  // كرة منقطة (توزيع فيبوناتشي)
+  const dots = []; const N = 650;
+  for (let i = 0; i < N; i++) {
+    const y = 1 - (i / (N - 1)) * 2, rad = Math.sqrt(Math.max(0, 1 - y * y)), th = i * 2.399963;
+    dots.push([Math.cos(th) * rad, y, Math.sin(th) * rad]);
+  }
+  let rot = 0.6, dragging = false, px = 0;
+  cv.style.touchAction = 'pan-y';
+  cv.addEventListener('pointerdown', (e) => { dragging = true; px = e.clientX; });
+  window.addEventListener('pointermove', (e) => { if (dragging) { rot += (e.clientX - px) * 0.008; px = e.clientX; } });
+  window.addEventListener('pointerup', () => { dragging = false; });
+  const proj = (x, y, z) => {
+    const cr = Math.cos(rot), sr = Math.sin(rot);
+    const x1 = x * cr + z * sr, z1 = -x * sr + z * cr;
+    const tilt = 0.42, ct = Math.cos(tilt), st = Math.sin(tilt);
+    const y1 = y * ct - z1 * st, z2 = y * st + z1 * ct;
+    return [W / 2 + x1 * R, H / 2 - y1 * R, z2];
+  };
+  const SEVC = { RED: '#f4212e', ORANGE: '#ff9f0a', YELLOW: '#ffd400' };
+  let t = 0;
+  (function draw() {
+    if (!document.body.contains(cv)) return;
+    t += 0.035; if (!dragging) rot += 0.0032;
+    ctx.clearRect(0, 0, W, H);
+    const g = ctx.createRadialGradient(W / 2, H / 2, R * 0.1, W / 2, H / 2, R * 1.35);
+    g.addColorStop(0, 'rgba(29,155,240,0.12)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    for (const d of dots) {
+      const p = proj(d[0], d[1], d[2]);
+      if (p[2] < -0.12) continue;
+      const a = 0.08 + 0.30 * Math.max(0, p[2]);
+      ctx.fillStyle = 'rgba(140,170,200,' + a.toFixed(2) + ')';
+      const s = Math.max(1, dpr * 0.85);
+      ctx.fillRect(p[0], p[1], s, s);
+    }
+    for (const r of rows) {
+      if (r.lat == null || r.lon == null) continue;
+      const la = r.lat * Math.PI / 180, lo = r.lon * Math.PI / 180;
+      const p = proj(Math.cos(la) * Math.cos(lo), Math.sin(la), -Math.cos(la) * Math.sin(lo));
+      if (p[2] < 0.02) continue;
+      const col = SEVC[r.severity] || '#ffd400';
+      const pulse = (Math.sin(t * 2.2) + 1) / 2;
+      ctx.beginPath(); ctx.arc(p[0], p[1], (4 + pulse * 5) * dpr, 0, 7);
+      ctx.fillStyle = col + '2e'; ctx.fill();
+      ctx.beginPath(); ctx.arc(p[0], p[1], 2.6 * dpr, 0, 7);
+      ctx.fillStyle = col; ctx.fill();
+    }
+    requestAnimationFrame(draw);
+  })();
+}
+function renderWarTable(rows) {
+  const el = document.getElementById('wtable'); if (!el) return;
+  if (!rows.length) {
+    el.innerHTML = '<div class="empty"><span class="e-ic">🌍</span>لا توجد تقارير بعد — كن أول من يشعل مسرح العمليات.</div>';
+    return;
+  }
+  el.innerHTML = `<div class="war-table">` + rows.map((r) => `
+    <div class="war-row sev-${r.severity}">
+      <span class="war-flag">${r.flag}</span>
+      <span class="war-name">${esc(r.name)}</span>
+      <span class="war-sev">${SEV_AR[r.severity]}</span>
+      <span class="war-num"><b>${r.war}</b><i>تقارير حرب</i></span>
+      <span class="war-num"><b>${r.mentions}</b><i>كل الإشارات</i></span>
+      <span class="war-trend tr-${r.trend}">${TREND_AR[r.trend]}</span>
+    </div>`).join('') + `</div>
+    <div class="war-upd">آخر تحديث: ${new Date().toLocaleString('ar-EG')} · نافذة 30 يومًا</div>`;
+}
+function renderBriefs(rows) {
+  const el = document.getElementById('wbriefs'); if (!el) return;
+  const top = rows.filter((r) => r.brief && r.brief.length).slice(0, 6);
+  if (!top.length) { el.innerHTML = '<div class="empty">لا توجد موجزات بعد.</div>'; return; }
+  el.innerHTML = top.map((r) => `
+    <article class="war-brief">
+      <header>
+        <span class="war-flag">${r.flag}</span>
+        <div class="war-brief-tx"><b>${esc(r.name)}</b><time>${new Date().toLocaleDateString('ar-EG')}</time></div>
+        <span class="war-sev">${SEV_AR[r.severity]}</span>
+      </header>
+      <ul>${r.brief.map((b) => `<li>${esc(b)}</li>`).join('')}</ul>
+      ${r.user ? `<a class="war-more" href="#/u/${encodeURIComponent(r.user)}">ملف الدولة ←</a>`
+               : `<a class="war-more" href="#/cat/war">تقارير الحرب ←</a>`}
+    </article>`).join('');
 }
 
 // ---------- مقال ----------
@@ -936,7 +1060,7 @@ async function vUser(username) {
 function navKey(h) {
   if (h === '#/' || h === '') return '#/';
   if (h.startsWith('#/cat/')) return '#/cat/' + h.split('/')[2];
-  if (h === '#/dispatches' || h === '#/dossiers' || h === '#/dash' || h === '#/login' || h === '#/messages') return h;
+  if (h === '#/dispatches' || h === '#/dossiers' || h === '#/news' || h === '#/dash' || h === '#/login' || h === '#/messages') return h;
   if (h.startsWith('#/messages/')) return '#/messages';
   if (h.startsWith('#/d/')) return '#/dispatches';
   return null;
@@ -955,6 +1079,7 @@ async function route() {
     else if (h === '#/messages') await vMessages();
     else if (h === '#/dispatches') await vDispatches();
     else if (h === '#/dossiers') await vDossiers();
+    else if (h === '#/news') await vNews();
     else if (h.startsWith('#/dossier/')) await vDossier(decodeURIComponent(h.split('/')[2] || ''));
     else if (h === '#/login') vLogin();
     else if (h === '#/register') await vRegister();

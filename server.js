@@ -12,6 +12,7 @@ const multer = require('multer');
 const { Pool } = require('pg');
 const { createClient } = require('@supabase/supabase-js');
 const { COUNTRIES } = require('./countries');
+const { LATLON } = require('./geo');
 
 const PORT = process.env.PORT || 3000;
 
@@ -238,6 +239,54 @@ const cleanImage = (v) =>
 
 // ---------- الدول ----------
 app.get('/api/countries', (req, res) => res.json(COUNTRIES));
+
+// ---------- غرفة الحرب: شدة الصراع والموجز اليومي (نافذة 30 يومًا) ----------
+app.get('/api/conflict', ah(async (req, res) => {
+  const now = Date.now(), D = 864e5, W = 30 * D;
+  const arts = await all(
+    `SELECT a.category,a.title,a.created_at,u.country_code,u.username FROM articles a
+     JOIN users u ON u.id=a.user_id WHERE a.created_at>=$1`, [now - W]);
+  const dsps = await all(
+    `SELECT d.body,d.created_at,u.country_code,u.username FROM dispatches d
+     JOIN users u ON u.id=d.user_id WHERE d.created_at>=$1`, [now - W]);
+  const prevA = await all(
+    `SELECT u.country_code,COUNT(*)::int c FROM articles a JOIN users u ON u.id=a.user_id
+     WHERE a.created_at>=$1 AND a.created_at<$2 GROUP BY u.country_code`, [now - 2 * W, now - W]);
+  const prevD = await all(
+    `SELECT u.country_code,COUNT(*)::int c FROM dispatches d JOIN users u ON u.id=d.user_id
+     WHERE d.created_at>=$1 AND d.created_at<$2 GROUP BY u.country_code`, [now - 2 * W, now - W]);
+  const map = {};
+  const bump = (cc, kind, head, ts, username) => {
+    if (!cc) return;
+    const e = map[cc] || (map[cc] = { war: 0, official: 0, events: 0, dispatches: 0, heads: [], user: null, uts: 0 });
+    if (kind === 'war' || kind === 'official' || kind === 'events') e[kind]++; else e.dispatches++;
+    if (head) e.heads.push({ t: head, ts });
+    if (username && ts > e.uts) { e.user = username; e.uts = ts; }
+  };
+  arts.forEach((a) => bump(a.country_code, a.category, a.title, a.created_at, a.username));
+  dsps.forEach((d) => bump(d.country_code, 'dispatches', d.body.slice(0, 90), d.created_at, d.username));
+  const ptot = {};
+  prevA.forEach((r) => { ptot[r.country_code] = (ptot[r.country_code] || 0) + r.c; });
+  prevD.forEach((r) => { ptot[r.country_code] = (ptot[r.country_code] || 0) + r.c; });
+  const rows = Object.entries(map).map(([cc, e]) => {
+    const c = COUNTRIES.find((x) => x.code === cc) || { name: cc, flag: '🏳️' };
+    const total = e.war + e.official + e.events + e.dispatches;
+    const severity = (e.war >= 2 || total >= 10) ? 'RED' : (e.war >= 1 || total >= 5) ? 'ORANGE' : 'YELLOW';
+    const p = ptot[cc] || 0;
+    const trend = total > p * 1.2 ? 'up' : total < p * 0.8 ? 'down' : 'steady';
+    e.heads.sort((a, b) => b.ts - a.ts);
+    const ll = LATLON[cc] || [];
+    return {
+      code: cc, name: c.name, flag: c.flag, user: e.user,
+      lat: ll[0] ?? null, lon: ll[1] ?? null,
+      war: e.war, mentions: total, severity, trend,
+      brief: e.heads.slice(0, 3).map((h) => h.t),
+    };
+  }).filter((r) => r.lat !== null);
+  const rank = { RED: 0, ORANGE: 1, YELLOW: 2 };
+  rows.sort((a, b) => rank[a.severity] - rank[b.severity] || b.mentions - a.mentions);
+  res.json({ updated: now, window_days: 30, rows });
+}));
 
 // الدول المحجوزة من طرف لاعبين (لمنع تكرار اختيار نفس الدولة)
 app.get('/api/taken-countries', ah(async (req, res) => {
