@@ -74,14 +74,34 @@ function msg(t, ok) {
   const el = document.getElementById('msg');
   if (el) el.innerHTML = `<div class="${ok ? 'okmsg' : 'err'}">${esc(t)}</div>`;
 }
-// إعجابات محلية
-const likeStore = {
-  get() { try { return JSON.parse(localStorage.getItem('argos_likes') || '{}'); } catch (e) { return {}; } },
-  has(k) { return !!this.get()[k]; },
-  toggle(k) { const s = this.get(); s[k] ? delete s[k] : s[k] = 1; localStorage.setItem('argos_likes', JSON.stringify(s)); return !!s[k]; },
-};
+// عدّاد المشاهدات التقريبي (تجميلي فقط)
 const baseCount = (id, salt) => { let x = (id * 2654435761 + salt * 40503) % 997; return x < 0 ? -x : x; };
 const fmtN = (n) => n >= 1000 ? (n / 1000).toFixed(1).replace('.0', '') + 'K' : String(n);
+
+// جلب عدّادات الإعجابات/التعليقات الحقيقية دفعة واحدة وتحديث الواجهة
+async function hydrateEngagement(type) {
+  const kind = type === 'dispatch' ? 'd' : 'a';
+  const els = [...app.querySelectorAll(`[data-kind="${kind}"]`)];
+  const ids = els.map((el) => Number(el.dataset.id)).filter(Boolean);
+  if (!ids.length) return;
+  try {
+    const { counts, liked } = await api('GET', `/engagement?type=${type}&ids=${ids.join(',')}`);
+    const likedSet = new Set(liked || []);
+    for (const el of els) {
+      const id = Number(el.dataset.id);
+      const c = (counts && counts[id]) || { likes: 0, comments: 0 };
+      const lb = el.querySelector('[data-like]');
+      if (lb) {
+        lb.querySelector('[data-n]').textContent = fmtN(c.likes);
+        const on = likedSet.has(id);
+        lb.classList.toggle('on', on);
+        lb.querySelector('.a-ic').innerHTML = ICONS.heart(on);
+      }
+      const cc = el.querySelector('[data-ccount]');
+      if (cc) cc.textContent = fmtN(c.comments);
+    }
+  } catch (e) { /* تجاهل */ }
+}
 
 // ---------- القائمة الجانبية والودجت ----------
 const NAV = [
@@ -112,9 +132,7 @@ function renderNav(active) {
       <span class="av">${c.flag}</span>
       <span class="nu-tx"><span class="nu-name">${esc(me.username)}</span><br><span class="nu-handle">@${esc(me.username)}</span></span>
       <span class="nu-go">···</span></button>`;
-    document.getElementById('nuBtn').onclick = async () => {
-      if (confirm('تسجيل الخروج؟')) { await api('POST', '/logout'); me = null; location.hash = '#/'; boot(false); }
-    };
+    document.getElementById('nuBtn').onclick = () => { location.hash = '#/u/' + encodeURIComponent(me.username); };
   } else {
     nu.innerHTML = '';
   }
@@ -151,24 +169,22 @@ function renderWidgets() {
 function tweetHTML(d) {
   const c = countryOf(d.author.country_code);
   const canDel = me && (me.id === d.author.id || me.role === 'admin');
-  const lk = 'd' + d.id, liked = likeStore.has(lk);
-  const likes = baseCount(d.id, 7) + (liked ? 1 : 0);
   const views = fmtN(baseCount(d.id, 13) + 40);
   const isHQ = d.author.country_code === 'HQ';
   return `<article class="tweet" data-kind="d" data-id="${d.id}">
-    <span class="av">${c.flag}</span>
+    <span class="av" data-user="${esc(d.author.username)}" style="cursor:pointer">${c.flag}</span>
     <div class="tw-main">
       <div class="tw-head">
-        <span class="tw-name">${esc(c.name)}</span>${isHQ ? ICONS.checkGold : ICONS.check}
+        <span class="tw-name" data-user="${esc(d.author.username)}" style="cursor:pointer">${esc(c.name)}</span>${isHQ ? ICONS.checkGold : ICONS.check}
         <span class="tw-handle">@${esc(d.author.username)} · ${timeAgo(d.created_at)}</span>
         ${canDel ? `<button class="tw-del" data-del-d="${d.id}" title="حذف">${ICONS.trash}</button>` : ''}
       </div>
       <div class="tw-body">${esc(d.body)}</div>
       ${d.image ? `<img class="tw-img" src="${esc(d.image)}" loading="lazy" alt="">` : ''}
       <div class="tw-actions">
-        <button class="tw-act reply" data-go="#/dash">${'<span class="a-ic">' + ICONS.reply + '</span>'}<span>${fmtN(baseCount(d.id, 3))}</span></button>
+        <button class="tw-act reply" data-go="#/d/${d.id}">${'<span class="a-ic">' + ICONS.reply + '</span>'}<span data-ccount>0</span></button>
         <button class="tw-act repost" data-repost="${d.id}">${'<span class="a-ic">' + ICONS.repost + '</span>'}<span>${fmtN(baseCount(d.id, 5))}</span></button>
-        <button class="tw-act like${liked ? ' on' : ''}" data-like="${lk}">${'<span class="a-ic">' + ICONS.heart(liked) + '</span>'}<span>${fmtN(likes)}</span></button>
+        <button class="tw-act like" data-like="dispatch:${d.id}">${'<span class="a-ic">' + ICONS.heart(false) + '</span>'}<span data-n>0</span></button>
         <button class="tw-act views">${'<span class="a-ic">' + ICONS.views + '</span>'}<span>${views}</span></button>
         <button class="tw-act share" data-share-d="${d.id}">${'<span class="a-ic">' + ICONS.share + '</span>'}</button>
       </div>
@@ -183,20 +199,27 @@ function articleCardHTML(a) {
     ${a.image ? `<img class="ac-img" src="${esc(a.image)}" loading="lazy" alt="">` : ''}
     <h3>${esc(a.title)}</h3>
     <p>${esc(excerpt(a.body, 160))}</p>
-    <div class="tw-head"><span class="av" style="width:30px;height:30px;font-size:1rem">${c.flag}</span>
-      <span class="tw-name" style="font-size:.85rem">${esc(c.name)}</span>
+    <div class="tw-head"><span class="av" style="width:30px;height:30px;font-size:1rem" data-user="${esc(a.author.username)}">${c.flag}</span>
+      <span class="tw-name" style="font-size:.85rem" data-user="${esc(a.author.username)}">${esc(c.name)}</span>
       <span class="tw-handle">@${esc(a.author.username)} · ${timeAgo(a.created_at)}</span></div>
+    <div class="tw-actions">
+      <button class="tw-act like" data-like="article:${a.id}">${'<span class="a-ic">' + ICONS.heart(false) + '</span>'}<span data-n>0</span></button>
+      <button class="tw-act reply" data-go="#/article/${a.id}">${'<span class="a-ic">' + ICONS.reply + '</span>'}<span data-ccount>0</span></button>
+    </div>
   </article>`;
 }
 // تفويض النقرات داخل التايم لاين
 function bindFeed() {
-  app.querySelectorAll('[data-like]').forEach((b) => b.onclick = (e) => {
+  app.querySelectorAll('[data-like]').forEach((b) => b.onclick = async (e) => {
     e.stopPropagation();
-    const on = likeStore.toggle(b.dataset.like);
-    b.classList.toggle('on', on);
-    b.querySelector('.a-ic').innerHTML = ICONS.heart(on);
-    const n = b.querySelector('span:last-child');
-    n.textContent = fmtN(parseInt(n.textContent.replace('K', '000')) + (on ? 1 : -1) || (on ? 1 : 0));
+    if (!me) { location.hash = '#/login'; return; }
+    const [type, id] = b.dataset.like.split(':');
+    try {
+      const r = await api('POST', '/likes', { type, id: Number(id) });
+      b.classList.toggle('on', r.liked);
+      b.querySelector('.a-ic').innerHTML = ICONS.heart(r.liked);
+      b.querySelector('[data-n]').textContent = fmtN(r.likes);
+    } catch (err) { alert(err.message); }
   });
   app.querySelectorAll('[data-del-d]').forEach((b) => b.onclick = async (e) => {
     e.stopPropagation();
@@ -205,7 +228,8 @@ function bindFeed() {
   });
   app.querySelectorAll('[data-share-d]').forEach((b) => b.onclick = (e) => {
     e.stopPropagation();
-    const url = location.origin + location.pathname + '#/dispatches';
+    const t = b.closest('.tweet');
+    const url = location.origin + location.pathname + '#/d/' + (t ? t.dataset.id : '0');
     (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject()).then(
       () => alert('تم نسخ رابط البرقية ✓'), () => prompt('انسخ الرابط:', url));
   });
@@ -215,11 +239,20 @@ function bindFeed() {
     location.hash = '#/dash'; setTimeout(() => dashTab('new-d'), 350);
   });
   app.querySelectorAll('[data-go]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); location.hash = b.dataset.go; });
-  app.querySelectorAll('.tweet').forEach((t) => t.onclick = () => {
-    const img = t.querySelector('.tw-img');
-    if (img) window.open(img.src, '_blank');
+  app.querySelectorAll('[data-user]').forEach((el) => el.onclick = (e) => {
+    e.stopPropagation(); location.hash = '#/u/' + encodeURIComponent(el.dataset.user);
   });
-  app.querySelectorAll('.acard').forEach((c) => c.onclick = () => { location.hash = '#/article/' + c.dataset.id; });
+  app.querySelectorAll('.tweet').forEach((t) => t.onclick = (e) => {
+    if (e.target.closest('button') || e.target.closest('img') || e.target.closest('[data-user]')) return;
+    location.hash = '#/d/' + t.dataset.id;
+  });
+  app.querySelectorAll('.tweet .tw-img').forEach((img) => img.onclick = (e) => {
+    e.stopPropagation(); window.open(img.src, '_blank');
+  });
+  app.querySelectorAll('.acard').forEach((c) => c.onclick = (e) => {
+    if (e.target.closest('button') || e.target.closest('[data-user]')) return;
+    location.hash = '#/article/' + c.dataset.id;
+  });
 }
 const thead = (title, tabs) => `<div class="thead"><div class="thead-title">${title}</div>
   ${tabs ? `<div class="ttabs">${tabs}</div>` : ''}</div>`;
@@ -269,8 +302,10 @@ function bindComposer(after) {
 async function vHome() {
   app.innerHTML = thead('الرئيسية',
     `<button class="ttab active" data-ht="d">البرقيات</button><button class="ttab" data-ht="a">المقالات</button>`) +
-    composerHTML() + `<div id="feed"><div class="spin"></div></div>`;
+    `<div id="sbar"></div>` + composerHTML() + `<div id="feed"><div class="spin"></div></div>`;
   bindComposer(() => route());
+  document.getElementById('sbar').innerHTML = await storyBarHTML();
+  bindStories();
   const tabs = app.querySelectorAll('[data-ht]');
   const load = async (kind) => {
     tabs.forEach((t) => t.classList.toggle('active', t.dataset.ht === kind));
@@ -286,7 +321,7 @@ async function vHome() {
         feed.innerHTML = items.length ? items.map(articleCardHTML).join('')
           : '<div class="empty"><span class="e-ic">📰</span>لا توجد مقالات بعد.</div>';
       }
-      bindFeed();
+      bindFeed(); hydrateEngagement(kind === 'd' ? 'dispatch' : 'article');
     } catch (e) { feed.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
   };
   tabs.forEach((t) => t.onclick = () => load(t.dataset.ht));
@@ -301,7 +336,7 @@ async function vDispatches() {
     const items = await api('GET', '/dispatches?limit=40');
     document.getElementById('feed').innerHTML = items.length ? items.map(tweetHTML).join('')
       : '<div class="empty"><span class="e-ic">📜</span>لا توجد برقيات بعد.</div>';
-    bindFeed();
+    bindFeed(); hydrateEngagement('dispatch');
   } catch (e) { document.getElementById('feed').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 
@@ -312,7 +347,7 @@ async function vCat(cat) {
     const items = await api('GET', `/articles?category=${cat}&limit=30`);
     document.getElementById('feed').innerHTML = items.length ? items.map(articleCardHTML).join('')
       : '<div class="empty"><span class="e-ic">📰</span>لا توجد مواد في هذا القسم بعد.</div>';
-    bindFeed();
+    bindFeed(); hydrateEngagement('article');
   } catch (e) { document.getElementById('feed').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 
@@ -327,17 +362,23 @@ async function vArticle(id) {
     const gold = a.category === 'official';
     app.innerHTML = `<div class="backrow"><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
       <div class="thead-title" style="padding:0">مقال</div></div>
-      <div class="detail"><div class="d-pad">
+      <div class="detail" data-kind="a" data-id="${a.id}"><div class="d-pad">
         <span class="tw-cat${gold ? ' gold' : ''}">${esc(a.category_label)}</span>
         <h1>${esc(a.title)}</h1>
-        <div class="tw-head"><span class="av" style="width:38px;height:38px;font-size:1.3rem">${c.flag}</span>
-          <span class="tw-name">${esc(c.name)}</span>${a.author.country_code === 'HQ' ? ICONS.checkGold : ICONS.check}
+        <div class="tw-head"><span class="av" style="width:38px;height:38px;font-size:1.3rem" data-user="${esc(a.author.username)}">${c.flag}</span>
+          <span class="tw-name" data-user="${esc(a.author.username)}" style="cursor:pointer">${esc(c.name)}</span>${a.author.country_code === 'HQ' ? ICONS.checkGold : ICONS.check}
           <span class="tw-handle">@${esc(a.author.username)} · ${timeAgo(a.created_at)}</span>
           ${canDel ? `<button class="btn danger" style="margin-inline-start:auto" onclick="delArticle(${a.id})">حذف المقال</button>` : ''}
+        </div>
+        <div class="tw-actions" style="border:none;padding:8px 0 0">
+          <button class="tw-act like" data-like="article:${a.id}">${'<span class="a-ic">' + ICONS.heart(false) + '</span>'}<span data-n>0</span></button>
+          <button class="tw-act reply">${'<span class="a-ic">' + ICONS.reply + '</span>'}<span data-ccount>0</span></button>
         </div></div>
         ${a.image ? `<div class="d-pad"><img class="lead-img" src="${esc(a.image)}" alt=""></div>` : ''}
         <div class="body">${esc(a.body)}</div>
+        ${commentsHTML()}
       </div>`;
+    bindFeed(); hydrateEngagement('article'); loadComments('article', a.id);
   } catch (e) { app.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 async function delArticle(id) {
@@ -480,8 +521,12 @@ async function vDash() {
       <div class="p-head"><div class="p-id">
         <div class="p-name">${esc(c.name)} ${me.role === 'admin' ? ICONS.checkGold : ICONS.check}</div>
         <div class="p-handle">@${esc(me.username)}</div></div>
+        <span style="display:flex;gap:8px">
+          <a class="btn ghost" href="#/u/${esc(me.username)}" style="width:auto;padding:8px 16px">بروفايلي</a>
+          <button class="btn ghost" id="logoutBtn" style="width:auto;padding:8px 16px">خروج</button>
+        </span>
       </div>
-      <p class="p-bio">${c.flag} الحساب الرسمي لدولة ${esc(c.name)} في محاكاة أرجوس للتاريخ — 1900.</p>
+      <p class="p-bio">${me.bio ? esc(me.bio) : `${c.flag} الحساب الرسمي لدولة ${esc(c.name)} في محاكاة أرجوس للتاريخ — 1900.`}</p>
       <div class="p-meta"><span>📍 ${esc(c.name)}</span><span>🗓️ انضم ${timeAgo(me.created_at || Date.now())}</span>
         ${me.role === 'admin' ? '<span>⭐ إدارة المقر</span>' : ''}</div>
       <div class="p-meta"><span><b>${mine_d}</b> برقية</span><span><b>${mine_a}</b> مقال</span></div>
@@ -490,6 +535,7 @@ async function vDash() {
       <button class="ptab active" data-pt="feed">منشوراتي</button>
       <button class="ptab" data-pt="new-d">برقية جديدة</button>
       <button class="ptab" data-pt="new-a">مقال جديد</button>
+      <button class="ptab" data-pt="edit">تعديل البروفايل</button>
       <button class="ptab" data-pt="dossier">ملفي الاستخباراتي</button>
     </div>
     <div id="pbody"></div>`;
@@ -497,6 +543,9 @@ async function vDash() {
   tabs.forEach((t) => t.onclick = () => {
     tabs.forEach((x) => x.classList.remove('active')); t.classList.add('active'); dashTab(t.dataset.pt);
   });
+  document.getElementById('logoutBtn').onclick = async () => {
+    if (confirm('تسجيل الخروج؟')) { await api('POST', '/logout'); me = null; location.hash = '#/'; boot(false); }
+  };
   dashTab('feed');
 }
 async function dashTab(t) {
@@ -527,6 +576,12 @@ async function dashTab(t) {
       <div class="field"><label>نص المقال</label><textarea id="abody" style="min-height:220px" placeholder="اكتب سيناريو المعركة أو الحدث بالتفصيل…"></textarea></div>
       <div class="field"><label class="filebtn">${ICONS.img} صورة المقال (اختياري)<input id="aimg" type="file" accept="image/*" style="display:none"></label></div>
       <button class="btn" style="width:auto;padding:12px 44px" onclick="sendArticle()">نشر المقال</button></div>`;
+  } else if (t === 'edit') {
+    body.innerHTML = `<div class="form-dark"><h2>تعديل البروفايل</h2><div id="msg"></div>
+      <div class="field"><label>النبذة التعريفية (البايو) — 160 حرفًا كحد أقصى</label>
+        <textarea id="pbio" maxlength="160" placeholder="عرّف بنفسك وبمشروع دولتك…">${esc(me.bio || '')}</textarea></div>
+      <button class="btn" style="width:auto;padding:12px 44px" onclick="saveBio()">حفظ البايو</button>
+      <a class="btn ghost" href="#/u/${esc(me.username)}" style="margin-inline-start:8px">معاينة بروفايلي</a></div>`;
   } else {
     body.innerHTML = '<div class="spin"></div>';
     await vDashDossier(body);
@@ -554,6 +609,13 @@ async function sendArticle() {
 async function delDispatch(id) {
   if (!confirm('حذف هذه البرقية؟')) return;
   await api('DELETE', `/dispatches/${id}`); dashTab('feed');
+}
+async function saveBio() {
+  try {
+    const r = await api('POST', '/profile', { bio: val('pbio') });
+    me.bio = r.bio;
+    msg('تم حفظ البايو ✓', true);
+  } catch (e) { msg(e.message, false); }
 }
 async function vDashDossier(body) {
   let r;
@@ -613,11 +675,229 @@ async function saveDossier() {
   } catch (e) { msg(e.message, false); }
 }
 
+// ---------- التعليقات ----------
+function commentsHTML() {
+  const c = me ? countryOf(me.country_code) : null;
+  return `<div class="comments"><div class="sec-h">التعليقات</div>
+    <div id="clist"><div class="spin"></div></div>
+    ${me ? `<div class="cform"><span class="av" style="width:38px;height:38px;font-size:1.2rem">${c.flag}</span>
+      <input id="cinput" maxlength="500" placeholder="اكتب تعليقك…">
+      <button class="c-post" id="csend">نشر</button></div>`
+    : `<p class="hint" style="padding:0 18px 16px"><a href="#/login" style="color:var(--accent)">سجّل الدخول</a> للمشاركة في التعليقات</p>`}
+  </div>`;
+}
+async function loadComments(type, id) {
+  const box = document.getElementById('clist');
+  if (!box) return;
+  try {
+    const list = await api('GET', `/comments/${type}/${id}`);
+    box.innerHTML = list.length ? list.map((cm) => {
+      const cc = countryOf(cm.author.country_code);
+      const canDel = me && (me.username === cm.author.username || me.role === 'admin');
+      return `<div class="comment"><span class="av" style="width:38px;height:38px;font-size:1.25rem">${cc.flag}</span>
+        <div class="cm-main"><div class="cm-head">
+          <span class="tw-name" data-user="${esc(cm.author.username)}" style="cursor:pointer">${esc(cc.name)}</span>
+          <span class="tw-handle">@${esc(cm.author.username)} · ${timeAgo(cm.created_at)}</span>
+          ${canDel ? `<button class="tw-del" data-cdel="${cm.id}">${ICONS.trash}</button>` : ''}</div>
+          <div class="cm-body">${esc(cm.body)}</div></div></div>`;
+    }).join('') : '<p class="hint" style="padding:4px 18px 14px">لا توجد تعليقات بعد — كن أول المعلقين.</p>';
+    box.querySelectorAll('[data-user]').forEach((el) => el.onclick = (e) => { e.stopPropagation(); location.hash = '#/u/' + encodeURIComponent(el.dataset.user); });
+    box.querySelectorAll('[data-cdel]').forEach((b) => b.onclick = async () => {
+      if (!confirm('حذف التعليق؟')) return;
+      await api('DELETE', '/comments/' + b.dataset.cdel);
+      loadComments(type, id); hydrateEngagement(type);
+    });
+  } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  const send = document.getElementById('csend');
+  if (send) send.onclick = async () => {
+    const inp = document.getElementById('cinput');
+    const v = inp.value.trim(); if (!v) return;
+    send.disabled = true;
+    try { await api('POST', '/comments', { type, id, body: v }); inp.value = ''; loadComments(type, id); hydrateEngagement(type); }
+    catch (e) { alert(e.message); }
+    send.disabled = false;
+  };
+}
+
+// ---------- الستوريات ----------
+let STORY_GROUPS = [];
+async function storyBarHTML() {
+  try { STORY_GROUPS = await api('GET', '/stories'); } catch (e) { STORY_GROUPS = []; }
+  let items = '';
+  if (me) {
+    items += `<div class="story" id="sadd"><span class="s-ring sadd">＋</span><span class="s-name">قصتك</span></div>`;
+    const mine = STORY_GROUPS.find((g) => g.user.username === me.username);
+    if (mine) {
+      const c = countryOf(mine.user.country_code);
+      items += `<div class="story" data-suser="${esc(mine.user.username)}"><span class="s-ring seen">${c.flag}</span><span class="s-name">${esc(mine.user.username)}</span></div>`;
+    }
+  }
+  for (const g of STORY_GROUPS) {
+    if (me && g.user.username === me.username) continue;
+    const c = countryOf(g.user.country_code);
+    items += `<div class="story" data-suser="${esc(g.user.username)}"><span class="s-ring">${c.flag}</span><span class="s-name">${esc(g.user.username)}</span></div>`;
+  }
+  return `<div class="stories">${items || '<span class="hint">لا توجد ستوريات بعد</span>'}</div>`;
+}
+function bindStories() {
+  const add = document.getElementById('sadd');
+  if (add) add.onclick = openStoryAdd;
+  app.querySelectorAll('[data-suser]').forEach((el) => el.onclick = () => openStory(el.dataset.suser));
+}
+function openStoryAdd() {
+  const ov = document.createElement('div');
+  ov.className = 'modal-ov';
+  ov.innerHTML = `<div class="modal-card">
+    <div class="m-head"><b>ستوري جديد</b><button class="m-x" id="saddx">✕</button></div>
+    <div class="m-msg"></div>
+    <textarea id="sbody" maxlength="300" placeholder="اكتب شيئًا… (اختياري)" rows="3"></textarea>
+    <div class="c-prev" id="sprev" style="display:none"><img id="sprevimg"><button id="spremx">✕</button></div>
+    <div class="c-tools">
+      <button class="c-ic" id="simgbtn" title="إرفاق صورة">${ICONS.img}</button>
+      <input type="file" id="simg" accept="image/*" style="display:none">
+      <button class="c-post" id="spost" style="margin-inline-start:auto">نشر الستوري</button>
+    </div>
+    <p class="hint">الستوري يختفي تلقائيًا بعد 24 ساعة ⏳</p>
+  </div>`;
+  document.body.appendChild(ov);
+  const m = (t, ok) => { ov.querySelector('.m-msg').innerHTML = t ? `<div class="${ok ? 'okmsg' : 'err'}">${esc(t)}</div>` : ''; };
+  let imgUrl = null;
+  const close = () => ov.remove();
+  ov.onclick = (e) => { if (e.target === ov) close(); };
+  document.getElementById('saddx').onclick = close;
+  document.getElementById('simgbtn').onclick = () => document.getElementById('simg').click();
+  document.getElementById('simg').onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try { m('جارٍ رفع الصورة…', true); imgUrl = await uploadImage(f);
+      document.getElementById('sprevimg').src = imgUrl; document.getElementById('sprev').style.display = ''; m('');
+    } catch (err) { m(err.message, false); }
+  };
+  document.getElementById('spremx').onclick = () => { document.getElementById('sprev').style.display = 'none'; imgUrl = null; };
+  document.getElementById('spost').onclick = async () => {
+    const body = document.getElementById('sbody').value.trim();
+    if (!body && !imgUrl) { m('أضف نصًا أو صورة', false); return; }
+    try { await api('POST', '/stories', { body, image: imgUrl }); close(); route(); }
+    catch (err) { m(err.message, false); }
+  };
+}
+function openStory(username) {
+  const g = STORY_GROUPS.find((x) => x.user.username === username);
+  if (!g) return;
+  const c = countryOf(g.user.country_code);
+  const ov = document.createElement('div');
+  ov.className = 'sview-ov';
+  document.body.appendChild(ov);
+  let i = 0, timer = null;
+  const close = () => { clearTimeout(timer); ov.remove(); };
+  const render = () => {
+    clearTimeout(timer);
+    const s = g.stories[i];
+    const canDel = me && g.user.username === me.username;
+    ov.innerHTML = `<div class="sview">
+      <div class="sv-prog">${g.stories.map((_, k) => `<span><i class="${k < i ? 'done' : k === i ? 'run' : ''}"></i></span>`).join('')}</div>
+      <div class="sv-head"><span class="av">${c.flag}</span>
+        <span class="tw-name" style="color:#fff">${esc(g.user.username)}</span>
+        <span class="tw-handle">· ${timeAgo(s.created_at)}</span>
+        <span style="margin-inline-start:auto;display:flex;gap:4px">
+          ${canDel ? `<button class="sv-x" id="svdel" title="حذف">${ICONS.trash}</button>` : ''}
+          <button class="sv-x" id="svx">✕</button></span></div>
+      ${s.image ? `<img class="sv-img" src="${esc(s.image)}">` : `<div class="sv-body only">${esc(s.body) || ''}</div>`}
+      ${s.image && s.body ? `<div class="sv-cap">${esc(s.body)}</div>` : ''}
+      <div class="sv-zone prev" id="svprev"></div><div class="sv-zone next" id="svnext"></div>
+    </div>`;
+    document.getElementById('svx').onclick = (e) => { e.stopPropagation(); close(); };
+    const del = document.getElementById('svdel');
+    if (del) del.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm('حذف هذا الستوري؟')) return;
+      await api('DELETE', '/stories/' + s.id);
+      g.stories.splice(i, 1);
+      if (!g.stories.length) { STORY_GROUPS = STORY_GROUPS.filter((x) => x.user.username !== username); close(); route(); return; }
+      i = Math.min(i, g.stories.length - 1); render();
+    };
+    document.getElementById('svprev').onclick = (e) => { e.stopPropagation(); i = (i - 1 + g.stories.length) % g.stories.length; render(); };
+    document.getElementById('svnext').onclick = (e) => { e.stopPropagation(); i = (i + 1) % g.stories.length; render(); };
+    timer = setTimeout(() => { i++; if (i >= g.stories.length) close(); else render(); }, 5000);
+  };
+  render();
+}
+
+// ---------- برقية: تفاصيل + تعليقات ----------
+async function vDispatch(id) {
+  app.innerHTML = `<div class="backrow"><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
+    <div class="thead-title" style="padding:0">برقية</div></div><div class="spin"></div>`;
+  try {
+    const d = await api('GET', `/dispatches/${id}`);
+    app.innerHTML = `<div class="backrow"><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
+      <div class="thead-title" style="padding:0">برقية</div></div>
+      ${tweetHTML(d)}
+      ${commentsHTML()}`;
+    bindFeed();
+    await hydrateEngagement('dispatch');
+    loadComments('dispatch', d.id);
+  } catch (e) { app.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+// ---------- بروفايل عام ----------
+async function vUser(username) {
+  app.innerHTML = `<div class="backrow"><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
+    <div class="thead-title" style="padding:0">البروفايل</div></div><div class="spin"></div>`;
+  try {
+    const { user, stats } = await api('GET', '/user/' + encodeURIComponent(username));
+    const c = countryOf(user.country_code);
+    const isMine = me && me.username === user.username;
+    app.innerHTML = `
+      <div class="backrow"><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
+        <div><div class="thead-title" style="padding:0">${esc(user.username)}</div>
+        <div class="hint">${stats.dispatches} برقية · ${stats.articles} مقال</div></div></div>
+      <div class="cover"></div>
+      <div class="prow">
+        <div class="p-av">${c.flag}</div>
+        <div class="p-head"><div class="p-id">
+          <div class="p-name">${esc(c.name)} ${user.role === 'admin' ? ICONS.checkGold : ICONS.check}</div>
+          <div class="p-handle">@${esc(user.username)}</div></div>
+          ${isMine ? `<a class="btn ghost" href="#/dash" style="width:auto;padding:8px 18px">تعديل</a>`
+            : `<a class="btn ghost" href="#/dossier/${esc(user.username)}" style="width:auto;padding:8px 18px">🗂️ الملف الاستخباراتي</a>`}
+        </div>
+        ${user.bio ? `<p class="p-bio">${esc(user.bio)}</p>`
+          : isMine ? `<p class="p-bio" style="opacity:.5">أضف نبذة تعريفية (بايو) من حسابك…</p>` : ''}
+        <div class="p-meta"><span>📍 ${esc(c.name)}</span><span>🗓️ انضم ${timeAgo(user.created_at)}</span>
+          ${user.role === 'admin' ? '<span>⭐ إدارة المقر</span>' : ''}</div>
+        <div class="p-meta"><span><b>${stats.dispatches}</b> برقية</span><span><b>${stats.articles}</b> مقال</span></div>
+      </div>
+      <div class="ptabs">
+        <button class="ptab active" data-pt="d">البرقيات</button>
+        <button class="ptab" data-pt="a">المقالات</button>
+      </div>
+      <div id="pfeed"><div class="spin"></div></div>`;
+    const tabs = app.querySelectorAll('[data-pt]');
+    const load = async (kind) => {
+      tabs.forEach((t) => t.classList.toggle('active', t.dataset.pt === kind));
+      const feed = document.getElementById('pfeed');
+      feed.innerHTML = '<div class="spin"></div>';
+      try {
+        if (kind === 'd') {
+          const items = (await api('GET', '/dispatches?limit=100')).filter((d) => d.author.username === username);
+          feed.innerHTML = items.length ? items.map(tweetHTML).join('') : '<div class="empty">لا توجد برقيات.</div>';
+          bindFeed(); hydrateEngagement('dispatch');
+        } else {
+          const items = (await api('GET', '/articles?limit=100')).filter((a) => a.author.username === username);
+          feed.innerHTML = items.length ? items.map(articleCardHTML).join('') : '<div class="empty">لا توجد مقالات.</div>';
+          bindFeed(); hydrateEngagement('article');
+        }
+      } catch (e) { feed.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+    };
+    tabs.forEach((t) => t.onclick = () => load(t.dataset.pt));
+    await load('d');
+  } catch (e) { app.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
 // ---------- التوجيه ----------
 function navKey(h) {
   if (h === '#/' || h === '') return '#/';
   if (h.startsWith('#/cat/')) return '#/cat/' + h.split('/')[2];
   if (h === '#/dispatches' || h === '#/dossiers' || h === '#/dash' || h === '#/login') return h;
+  if (h.startsWith('#/d/')) return '#/dispatches';
   return null;
 }
 async function route() {
@@ -627,6 +907,8 @@ async function route() {
     if (h === '#/' || h === '') await vHome();
     else if (h.startsWith('#/cat/')) await vCat(h.split('/')[2]);
     else if (h.startsWith('#/article/')) await vArticle(h.split('/')[2]);
+    else if (h.startsWith('#/d/')) await vDispatch(h.split('/')[2]);
+    else if (h.startsWith('#/u/')) await vUser(decodeURIComponent(h.split('/')[2] || ''));
     else if (h === '#/dispatches') await vDispatches();
     else if (h === '#/dossiers') await vDossiers();
     else if (h.startsWith('#/dossier/')) await vDossier(decodeURIComponent(h.split('/')[2] || ''));

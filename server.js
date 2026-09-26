@@ -100,6 +100,37 @@ async function initDb() {
   )`);
   await q('CREATE INDEX IF NOT EXISTS idx_articles_cat ON articles(category, created_at)');
   await q('CREATE INDEX IF NOT EXISTS idx_dispatches_time ON dispatches(created_at)');
+  // الإعجابات
+  await q(`CREATE TABLE IF NOT EXISTS likes (
+    user_id INTEGER NOT NULL,
+    target_type TEXT NOT NULL,
+    target_id INTEGER NOT NULL,
+    created_at BIGINT NOT NULL,
+    PRIMARY KEY (user_id, target_type, target_id)
+  )`);
+  // التعليقات
+  await q(`CREATE TABLE IF NOT EXISTS comments (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    target_type TEXT NOT NULL,
+    target_id INTEGER NOT NULL,
+    body TEXT NOT NULL,
+    created_at BIGINT NOT NULL
+  )`);
+  // الستوريات (تنتهي بعد 24 ساعة)
+  await q(`CREATE TABLE IF NOT EXISTS stories (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    body TEXT DEFAULT '',
+    image TEXT,
+    created_at BIGINT NOT NULL,
+    expires_at BIGINT NOT NULL
+  )`);
+  // البايو في البروفايل
+  try { await q("ALTER TABLE users ADD COLUMN bio TEXT DEFAULT ''"); } catch (e) { /* موجود مسبقًا */ }
+  await q('CREATE INDEX IF NOT EXISTS idx_likes_target ON likes(target_type, target_id)');
+  await q('CREATE INDEX IF NOT EXISTS idx_comments_target ON comments(target_type, target_id)');
+  await q('CREATE INDEX IF NOT EXISTS idx_stories_exp ON stories(expires_at)');
 
   // مستخدم النظام (مقر أرجوس) + مقال ترحيبي
   let sys = await one("SELECT id FROM users WHERE username='argos_hq'");
@@ -181,7 +212,7 @@ async function auth(req, res, next) {
   const t = getToken(req);
   if (!t) return res.status(401).json({ error: 'يجب تسجيل الدخول أولاً' });
   const row = await one(
-    'SELECT u.id,u.username,u.email,u.country_code,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at>$2',
+    'SELECT u.id,u.username,u.email,u.country_code,u.role,u.bio FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at>$2',
     [t, Date.now()]
   );
   if (!row) return res.status(401).json({ error: 'انتهت الجلسة، سجّل الدخول مجددًا' });
@@ -311,7 +342,7 @@ app.get('/api/me', ah(async (req, res) => {
   const t = getToken(req);
   if (!t) return res.json({ user: null });
   const row = await one(
-    'SELECT u.id,u.username,u.email,u.country_code,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at>$2',
+    'SELECT u.id,u.username,u.email,u.country_code,u.role,u.bio FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at>$2',
     [t, Date.now()]
   );
   res.json({ user: row || null });
@@ -385,6 +416,8 @@ app.delete('/api/articles/:id', ah(auth), ah(async (req, res) => {
   if (a.user_id !== req.user.id && req.user.role !== 'admin')
     return res.status(403).json({ error: 'لا تملك صلاحية الحذف' });
   await q('DELETE FROM articles WHERE id=$1', [req.params.id]);
+  await q("DELETE FROM likes WHERE target_type='article' AND target_id=$1", [req.params.id]);
+  await q("DELETE FROM comments WHERE target_type='article' AND target_id=$1", [req.params.id]);
   res.json({ ok: true });
 }));
 
@@ -420,7 +453,164 @@ app.delete('/api/dispatches/:id', ah(auth), ah(async (req, res) => {
   if (d.user_id !== req.user.id && req.user.role !== 'admin')
     return res.status(403).json({ error: 'لا تملك صلاحية الحذف' });
   await q('DELETE FROM dispatches WHERE id=$1', [req.params.id]);
+  await q("DELETE FROM likes WHERE target_type='dispatch' AND target_id=$1", [req.params.id]);
+  await q("DELETE FROM comments WHERE target_type='dispatch' AND target_id=$1", [req.params.id]);
   res.json({ ok: true });
+}));
+
+// ---------- التفاعل: إعجابات + تعليقات ----------
+const TGT = ['dispatch', 'article'];
+function inPlaceholders(ids, from) { return ids.map((_, i) => '$' + (from + i)).join(','); }
+
+// عدّادات الإعجابات/التعليقات دفعة واحدة + حالة إعجاب المستخدم الحالي
+app.get('/api/engagement', ah(async (req, res) => {
+  const type = TGT.includes(req.query.type) ? req.query.type : 'dispatch';
+  const ids = String(req.query.ids || '').split(',').map((x) => parseInt(x, 10)).filter((x) => x > 0).slice(0, 60);
+  const counts = {};
+  if (ids.length) {
+    const ph = inPlaceholders(ids, 2);
+    const lc = await all(`SELECT target_id, COUNT(*) AS c FROM likes WHERE target_type=$1 AND target_id IN (${ph}) GROUP BY target_id`, [type, ...ids]);
+    const cc = await all(`SELECT target_id, COUNT(*) AS c FROM comments WHERE target_type=$1 AND target_id IN (${ph}) GROUP BY target_id`, [type, ...ids]);
+    for (const r of lc) counts[r.target_id] = { likes: Number(r.c), comments: 0 };
+    for (const r of cc) {
+      counts[r.target_id] = counts[r.target_id] || { likes: 0, comments: 0 };
+      counts[r.target_id].comments = Number(r.c);
+    }
+  }
+  let liked = [];
+  const t = getToken(req);
+  if (t && ids.length) {
+    const mu = await one('SELECT u.id FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at>$2', [t, Date.now()]);
+    if (mu) {
+      const ph = inPlaceholders(ids, 3);
+      liked = (await all(`SELECT target_id FROM likes WHERE user_id=$1 AND target_type=$2 AND target_id IN (${ph})`, [mu.id, type, ...ids])).map((r) => r.target_id);
+    }
+  }
+  res.json({ counts, liked });
+}));
+
+// تبديل الإعجاب (like/unlike)
+app.post('/api/likes', ah(auth), ah(async (req, res) => {
+  const { type, id } = req.body || {};
+  if (!TGT.includes(type) || !Number.isInteger(id) || id <= 0)
+    return res.status(400).json({ error: 'طلب غير صالح' });
+  const tbl = type === 'dispatch' ? 'dispatches' : 'articles';
+  const ex = await one(`SELECT id FROM ${tbl} WHERE id=$1`, [id]);
+  if (!ex) return res.status(404).json({ error: 'المنشور غير موجود' });
+  const has = await one('SELECT 1 AS x FROM likes WHERE user_id=$1 AND target_type=$2 AND target_id=$3', [req.user.id, type, id]);
+  let liked;
+  if (has) {
+    await q('DELETE FROM likes WHERE user_id=$1 AND target_type=$2 AND target_id=$3', [req.user.id, type, id]);
+    liked = false;
+  } else {
+    await q('INSERT INTO likes (user_id,target_type,target_id,created_at) VALUES ($1,$2,$3,$4)', [req.user.id, type, id, Date.now()]);
+    liked = true;
+  }
+  const c = await one('SELECT COUNT(*) AS c FROM likes WHERE target_type=$1 AND target_id=$2', [type, id]);
+  res.json({ liked, likes: Number(c.c) });
+}));
+
+// ---------- التعليقات ----------
+app.get('/api/comments/:type/:id', ah(async (req, res) => {
+  const { type } = req.params;
+  if (!TGT.includes(type)) return res.status(400).json({ error: 'نوع غير صالح' });
+  const rows = await all(
+    `SELECT c.*,u.username,u.country_code FROM comments c JOIN users u ON u.id=c.user_id
+     WHERE c.target_type=$1 AND c.target_id=$2 ORDER BY c.created_at ASC LIMIT 200`,
+    [type, parseInt(req.params.id, 10) || 0]
+  );
+  res.json(rows.map((c) => ({
+    id: c.id, body: c.body, created_at: Number(c.created_at),
+    author: { username: c.username, country_code: c.country_code },
+  })));
+}));
+app.post('/api/comments', ah(auth), ah(async (req, res) => {
+  const { type, id, body } = req.body || {};
+  if (!TGT.includes(type) || !Number.isInteger(id) || id <= 0)
+    return res.status(400).json({ error: 'طلب غير صالح' });
+  const b = String(body || '').trim();
+  if (!b || b.length > 500) return res.status(400).json({ error: 'التعليق فارغ أو يتجاوز 500 حرف' });
+  const tbl = type === 'dispatch' ? 'dispatches' : 'articles';
+  const ex = await one(`SELECT id FROM ${tbl} WHERE id=$1`, [id]);
+  if (!ex) return res.status(404).json({ error: 'المنشور غير موجود' });
+  const r = await one(
+    'INSERT INTO comments (user_id,target_type,target_id,body,created_at) VALUES ($1,$2,$3,$4,$5) RETURNING id',
+    [req.user.id, type, id, b, Date.now()]
+  );
+  res.json({ ok: true, id: r.id });
+}));
+app.delete('/api/comments/:id', ah(auth), ah(async (req, res) => {
+  const c = await one('SELECT user_id FROM comments WHERE id=$1', [req.params.id]);
+  if (!c) return res.status(404).json({ error: 'التعليق غير موجود' });
+  if (c.user_id !== req.user.id && req.user.role !== 'admin')
+    return res.status(403).json({ error: 'لا تملك صلاحية الحذف' });
+  await q('DELETE FROM comments WHERE id=$1', [req.params.id]);
+  res.json({ ok: true });
+}));
+
+// ---------- الستوريات ----------
+app.get('/api/stories', ah(async (req, res) => {
+  const now = Date.now();
+  await q('DELETE FROM stories WHERE expires_at <= $1', [now]); // تنظيف المنتهية
+  const rows = await all(
+    `SELECT s.*,u.username,u.country_code FROM stories s JOIN users u ON u.id=s.user_id
+     WHERE s.expires_at > $1 ORDER BY s.created_at DESC LIMIT 120`, [now]
+  );
+  const map = {};
+  for (const r of rows) {
+    (map[r.username] = map[r.username] || { user: { username: r.username, country_code: r.country_code }, stories: [] })
+      .stories.push({ id: r.id, body: r.body || '', image: r.image, created_at: Number(r.created_at) });
+  }
+  const groups = Object.values(map);
+  groups.sort((a, b) => b.stories[0].created_at - a.stories[0].created_at);
+  res.json(groups);
+}));
+app.post('/api/stories', ah(auth), ah(async (req, res) => {
+  const { body, image } = req.body || {};
+  const b = String(body || '').trim().slice(0, 300);
+  const img = cleanImage(image);
+  if (!b && !img) return res.status(400).json({ error: 'أضف نصًا أو صورة للستوري' });
+  const now = Date.now();
+  const r = await one(
+    'INSERT INTO stories (user_id,body,image,created_at,expires_at) VALUES ($1,$2,$3,$4,$5) RETURNING id',
+    [req.user.id, b, img, now, now + 24 * 3600 * 1000]
+  );
+  res.json({ ok: true, id: r.id });
+}));
+app.delete('/api/stories/:id', ah(auth), ah(async (req, res) => {
+  const s = await one('SELECT user_id FROM stories WHERE id=$1', [req.params.id]);
+  if (!s) return res.status(404).json({ error: 'الستوري غير موجود' });
+  if (s.user_id !== req.user.id && req.user.role !== 'admin')
+    return res.status(403).json({ error: 'لا تملك صلاحية الحذف' });
+  await q('DELETE FROM stories WHERE id=$1', [req.params.id]);
+  res.json({ ok: true });
+}));
+
+// ---------- البروفايلات العامة + البايو ----------
+app.get('/api/user/:username', ah(async (req, res) => {
+  const u = await one('SELECT id,username,country_code,role,bio,created_at FROM users WHERE username=$1', [req.params.username]);
+  if (!u || u.username === 'argos_hq') return res.status(404).json({ error: 'المستخدم غير موجود' });
+  const dc = await one('SELECT COUNT(*) AS c FROM dispatches WHERE user_id=$1', [u.id]);
+  const ac = await one('SELECT COUNT(*) AS c FROM articles WHERE user_id=$1', [u.id]);
+  res.json({
+    user: { username: u.username, country_code: u.country_code, role: u.role, bio: u.bio || '', created_at: Number(u.created_at) },
+    stats: { dispatches: Number(dc.c), articles: Number(ac.c) },
+  });
+}));
+app.post('/api/profile', ah(auth), ah(async (req, res) => {
+  const bio = String((req.body || {}).bio || '').slice(0, 160);
+  await q('UPDATE users SET bio=$1 WHERE id=$2', [bio, req.user.id]);
+  res.json({ ok: true, bio });
+}));
+
+// برقية واحدة (صفحة التفاصيل)
+app.get('/api/dispatches/:id', ah(async (req, res) => {
+  const d = await one(
+    'SELECT d.*,u.username,u.country_code FROM dispatches d JOIN users u ON u.id=d.user_id WHERE d.id=$1',
+    [req.params.id]
+  );
+  if (!d) return res.status(404).json({ error: 'البرقية غير موجودة' });
+  res.json(dispatchRow(d));
 }));
 
 // ---------- الصفحة الرئيسية (التطبيق) ----------
