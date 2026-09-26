@@ -181,8 +181,10 @@ const DOSSIER_CLEARANCES = ['LEVEL 1', 'LEVEL 2', 'LEVEL 3', 'LEVEL 4', 'LEVEL 5
 // قائمة الملفات (نبذة)
 app.get('/api/dossiers', (req, res) => {
   const rows = db.prepare(`
-    SELECT d.user_id, d.alias, d.status, d.clearance, d.avatar, u.username, u.country_code
-    FROM dossiers d JOIN users u ON u.id = d.user_id
+    SELECT u.id AS user_id, COALESCE(d.alias,'') AS alias, COALESCE(d.status,'ACTIVE') AS status,
+           COALESCE(d.clearance,'LEVEL 1') AS clearance, COALESCE(d.avatar,'') AS avatar,
+           u.username, u.country_code
+    FROM users u LEFT JOIN dossiers d ON d.user_id = u.id
     WHERE u.role != 'system'
     ORDER BY u.id ASC`).all();
   res.json(rows);
