@@ -517,6 +517,38 @@ app.post('/api/admin/dev-token', ah(auth), ah(async (req, res) => {
 }));
 
 // قائمة المستخدمين للإدارة
+// ---------- إعداد الذكاء الاصطناعي الحقيقي (LLM) — للطاقم فقط ----------
+// المفتاح لا يُعاد للواجهة أبدًا (has_key فقط)
+app.get('/api/admin/ai-config', ah(auth), requireStaff, ah(async (req, res) => {
+  const c = await getAiConfig();
+  res.json({ enabled: c.enabled, provider: c.provider, model: c.model,
+    has_key: !!c.api_key, key_tail: c.api_key ? '…' + c.api_key.slice(-4) : '' });
+}));
+app.post('/api/admin/ai-config', ah(auth), requireStaff, ah(async (req, res) => {
+  const { enabled, provider, model, api_key } = req.body || {};
+  await setSetting('llm_enabled', enabled ? '1' : '0');
+  if (typeof provider === 'string' && LLM_PROVIDERS[provider])
+    await setSetting('llm_provider', provider);
+  if (typeof model === 'string' && model.trim().slice(0, 120))
+    await setSetting('llm_model', model.trim().slice(0, 120));
+  if (typeof api_key === 'string' && api_key.trim())
+    await setSetting('llm_api_key', api_key.trim());
+  await audit('ai_config', req.user.username, `تحديث إعداد LLM (مفعّل: ${enabled ? 'نعم' : 'لا'})`);
+  res.json({ ok: true });
+}));
+app.post('/api/admin/ai-test', ah(auth), requireStaff, ah(async (req, res) => {
+  const t0 = Date.now();
+  try {
+    const out = await llmChat(
+      [{ role: 'user', content: 'أجب JSON فقط: {"ok": true}' }],
+      { maxTokens: 50 });
+    const d = llmParseJSON(out);
+    const cfg = await getAiConfig();
+    res.json({ ok: !!d.ok, ms: Date.now() - t0, provider: cfg.provider, model: cfg.model });
+  } catch (e) {
+    res.status(502).json({ error: 'فشل الاتصال بالنموذج: ' + String(e.message).slice(0, 160) });
+  }
+}));
 app.get('/api/admin/users', ah(auth), requireStaff, ah(async (req, res) => {
   const rows = await all(
     "SELECT id,username,country_code,role,banned,created_at FROM users WHERE role!='system' ORDER BY created_at ASC"
@@ -1941,11 +1973,12 @@ app.get('/api/economy', ah(auth), ah(async (req, res) => {
   for (const c of counts) cmap[c.country_code] = Number(c.n) || 0;
   const aiRows = await all(`SELECT country_code FROM ai_nations WHERE enabled=1`);
   const aiSet = new Set(aiRows.map((r) => r.country_code));
-  const claimedRows = await all(`SELECT DISTINCT country_code FROM users WHERE country_code IS NOT NULL`);
+  const claimedRows = await all(`SELECT DISTINCT country_code FROM users WHERE country_code IS NOT NULL AND role NOT IN ('system','developer','ai_embassy')`);
   const claimedSet = new Set(claimedRows.map((r) => r.country_code));
+  const llmOn = await llmEnabled();
   res.json({
     economies: rows.map((r) => ({ ...econRow(r), companies_count: cmap[r.country_code] || 0,
-      ai_governed: aiSet.has(r.country_code) && !claimedSet.has(r.country_code) })),
+      ai_governed: aiSet.has(r.country_code) && !claimedSet.has(r.country_code), ai_llm: llmOn })),
     sectors: SECTORS, full,
   });
 }));
@@ -3582,6 +3615,20 @@ app.get('/api/ai/embassies', ah(auth), ah(async (req, res) => {
 }));
 // العقل الدبلوماسي: رد نصي + أفعال حقيقية أحيانًا
 async function aiDiplomaticReply(playerCC, aiCC, body) {
+  // 🧠 رد لغوي طبيعي + فعل آمن — عند الفشل يُستخدم القاعدي
+  if (await llmEnabled()) {
+    try {
+      const lr = await llmEmbassyReply(playerCC, aiCC, body);
+      const act = String(lr.action || 'none');
+      const w = await activeWarBetween(aiCC, playerCC);
+      if (act === 'peace' && w) { try { await peaceInternal(w.id, aiCC, LLM_ACTOR); } catch (e) { /* رفضها المحرك */ } }
+      else if (['non_aggression', 'trade', 'alliance'].includes(act)) {
+        try { await proposeTreaty(aiCC, playerCC, act, 0, LLM_ACTOR); } catch (e) { /* مكررة */ }
+      }
+      await audit('ai_embassy_llm', LLM_ACTOR, `رد لغوي لسفارة ${cname(aiCC)} على ${cname(playerCC)} [${act}]`);
+      return lr.reply;
+    } catch (e) { /* عودة للقاعدي */ }
+  }
   const strategy = aiStrategyFor(aiCC);
   const aiName = cname(aiCC);
   const w = await activeWarBetween(aiCC, playerCC);
@@ -3727,8 +3774,263 @@ async function aiClaimedSet() {
   const rows = await all(`SELECT DISTINCT country_code FROM users WHERE country_code IS NOT NULL AND role NOT IN ('system','developer','ai_embassy')`);
   return new Set(rows.map((r) => r.country_code));
 }
+// ============================================================================
+// 🧠 الحاكم اللغوي LLM — نموذج ذكاء اصطناعي حقيقي (مفتوح المصدر عبر OpenRouter)
+// ----------------------------------------------------------------------------
+// كل شهر لعبة، الدولة الذكية ترسل حالتها للنموذج فيقترح قرارات JSON.
+// المحرك يتحقق من كل قرار ضد قواعد اللعبة نفسها قبل التنفيذ — النموذج
+// يقترح والمحرك يقرر. أي فشل (شبكة/مهلة/تحليل) = عودة فورية للحاكم القاعدي.
+// مفتاح API يُحفظ في system_settings عبر لوحة الإدارة فقط — لا يصل الواجهة أبدًا.
+// ============================================================================
+const LLM_ACTOR = '🧠 الحاكم الذكي';
+async function ensureSettingsTable() {
+  await q(`CREATE TABLE IF NOT EXISTS system_settings (key TEXT PRIMARY KEY, value TEXT, updated_at BIGINT)`);
+}
+async function getSetting(k) {
+  await ensureSettingsTable();
+  const r = await one('SELECT value FROM system_settings WHERE key=$1', [k]);
+  return r ? r.value : null;
+}
+async function setSetting(k, v) {
+  await ensureSettingsTable();
+  await q(`INSERT INTO system_settings (key,value,updated_at) VALUES ($1,$2,$3)
+           ON CONFLICT (key) DO UPDATE SET value=$2, updated_at=$3`, [k, String(v), Date.now()]);
+}
+// مزودو النماذج اللغوية — كلها بواجهة متوافقة مع OpenAI
+// pollinations وllm7 مجانيان تمامًا بلا حساب ولا مفتاح؛ groq وgemini بطبقة مجانية سخية (مفتاح مجاني)
+const LLM_PROVIDERS = {
+  pollinations: { name: 'Pollinations (مجاني — بدون مفتاح)', url: 'https://text.pollinations.ai/openai',
+    keyRequired: false, defaultModel: 'openai', jsonMode: false },
+  llm7: { name: 'LLM7 (مجاني — بدون حساب)', url: 'https://api.llm7.io/v1/chat/completions',
+    keyRequired: false, defaultModel: 'DeepSeek-V4-Flash-0731', jsonMode: true, anonKey: 'unused' },
+  groq: { name: 'Groq (مجاني بحدود — مفتاح مجاني)', url: 'https://api.groq.com/openai/v1/chat/completions',
+    keyRequired: true, defaultModel: 'llama-3.3-70b-versatile', jsonMode: true },
+  gemini: { name: 'Gemini (مجاني بحدود — مفتاح مجاني)', url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    keyRequired: true, defaultModel: 'gemini-2.0-flash', jsonMode: true },
+  openrouter: { name: 'OpenRouter (مدفوع)', url: 'https://openrouter.ai/api/v1/chat/completions',
+    keyRequired: true, defaultModel: 'meta-llama/llama-3.3-70b-instruct', jsonMode: true,
+    extraHeaders: { 'HTTP-Referer': 'https://argos-press.game', 'X-Title': 'ARGOS AI Nations' } },
+};
+function llmProviderOf(id) { return LLM_PROVIDERS[id] || LLM_PROVIDERS.pollinations; }
+async function getAiConfig() {
+  const providerId = (await getSetting('llm_provider')) || 'pollinations';
+  const p = llmProviderOf(providerId);
+  return {
+    enabled: (await getSetting('llm_enabled')) === '1',
+    provider: LLM_PROVIDERS[providerId] ? providerId : 'pollinations',
+    model: (await getSetting('llm_model')) || p.defaultModel,
+    api_key: (await getSetting('llm_api_key')) || '',
+  };
+}
+async function llmEnabled() {
+  try {
+    const c = await getAiConfig();
+    const p = llmProviderOf(c.provider);
+    return c.enabled && (!p.keyRequired || !!c.api_key);
+  } catch (e) { return false; }
+}
+// استدعاء النموذج — يقترح فقط، والمحرك يتحقق وينفذ
+async function llmChat(messages, { maxTokens = 1500, json = true, temperature = 0.7, timeoutMs = 30000 } = {}) {
+  const cfg = await getAiConfig();
+  const p = llmProviderOf(cfg.provider);
+  if (!cfg.enabled) throw new Error('LLM_DISABLED');
+  const key = cfg.api_key || p.anonKey || '';
+  if (p.keyRequired && !key) throw new Error('LLM_NO_KEY');
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(p.url, {
+      method: 'POST', signal: ctrl.signal,
+      headers: {
+        ...(key ? { 'Authorization': 'Bearer ' + key } : {}),
+        'Content-Type': 'application/json',
+        ...(p.extraHeaders || {}),
+      },
+      body: JSON.stringify({
+        model: cfg.model || p.defaultModel, messages, max_tokens: maxTokens, temperature,
+        ...(json && p.jsonMode ? { response_format: { type: 'json_object' } } : {}),
+      }),
+    });
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      throw new Error('LLM_HTTP_' + r.status + ' ' + String(t).slice(0, 200));
+    }
+    const j = await r.json();
+    const c = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
+    if (!c) throw new Error('LLM_EMPTY');
+    return c;
+  } finally { clearTimeout(timer); }
+}
+function llmParseJSON(text) {
+  const m = String(text).match(/\{[\s\S]*\}/);
+  if (!m) throw new Error('LLM_NO_JSON');
+  return JSON.parse(m[0]);
+}
+// دور الحاكم اللغوي لشهر لعبة — يقترح النموذج، والمحرك يتحقق وينفذ
+async function llmGovernTurn(cc, monthIdx) {
+  const strategy = aiStrategyFor(cc);
+  const e = await one('SELECT * FROM country_economy WHERE country_code=$1', [cc]);
+  if (!e || e.revolt_active) return false; // ثورة = شلل
+  const army = await getArmy(cc);
+  const liq0 = Number(e.liquidity_m_usd) || 0;
+  const stab = Number(e.stability ?? 70), sup = Number(e.public_support ?? 60);
+  const tax = e.tax_rate != null ? Number(e.tax_rate) : 10;
+  const pop = Number(e.population) || 0;
+  const comps = await all(`SELECT id FROM companies WHERE host_country=$1 AND status='approved' AND resource_kind IS NOT NULL`, [cc]);
+  const wars = await all(`SELECT id, attacker_code, defender_code, score_a, score_b FROM wars
+                          WHERE status='active' AND (attacker_code=$1 OR defender_code=$1)`, [cc]);
+  const treaties = await all(`SELECT type, from_code, to_code FROM treaties
+                              WHERE status='active' AND (from_code=$1 OR to_code=$1)`, [cc]);
+  const pending = await all(`SELECT id, type, from_code FROM treaties WHERE to_code=$1 AND status='proposed'`, [cc]);
+  const claimed = await aiClaimedSet();
+  const armies = await all(`SELECT country_code, soldiers FROM armies ORDER BY soldiers DESC LIMIT 10`);
+  const state = {
+    country: cname(cc), code: cc, strategy, month: monthIdx,
+    economy: { liquidity_m_usd: Math.round(liq0), tax_rate: tax, stability: Math.round(stab), public_support: Math.round(sup), population: pop },
+    army: { soldiers: army.soldiers, readiness: Math.round(army.readiness), training: Math.round(army.training) },
+    companies: comps.length,
+    active_wars: wars.map((w) => ({
+      id: w.id, enemy: w.attacker_code === cc ? w.defender_code : w.attacker_code,
+      my_score: w.attacker_code === cc ? w.score_a : w.score_b,
+      enemy_score: w.attacker_code === cc ? w.score_b : w.score_a,
+    })),
+    treaties: treaties.map((t) => ({ type: t.type, with: t.from_code === cc ? t.to_code : t.from_code })),
+    pending_treaties: pending.map((t) => ({ id: t.id, type: t.type, from: t.from_code, from_name: cname(t.from_code) })),
+    top_armies: armies.filter((a) => a.country_code !== cc).map((a) => ({
+      code: a.country_code, soldiers: a.soldiers, human: claimed.has(a.country_code),
+    })),
+  };
+  const sys = 'أنت الحاكم الأعلى لدولة ' + state.country + ' في لعبة محاكاة جيوسياسية سنة 1900. '
+    + 'شخصيتك الاستراتيجية: ' + strategy + ' (conservative حذر دفاعي، balanced متوازن، expansionist توسعي طموح). '
+    + 'كل شهر لعبة تتخذ قرارات حكيمة تحفظ الدولة وتنميها. أجب بـJSON فقط بهذا الشكل (كل حقل اختياري):\n'
+    + '{"tax_rate": 0-30, "recruit": 0-20000, "train": true/false, "found_company": true/false,\n'
+    + ' "treaty_decisions": [{"id": 123, "accept": true/false}],\n'
+    + ' "treaties": [{"type": "non_aggression|trade|alliance|defensive", "to": "CODE"}],\n'
+    + ' "spy": {"target": "CODE", "kind": "economy|stability"},\n'
+    + ' "declare_war": "CODE أو null",\n'
+    + ' "reason": "سطر واحد يشرح منطقك"}\n'
+    + 'قواعد صارمة: الضريبة المرتفعة تهز الاستقرار. لا تعلن حربًا إلا بتفوق عسكري واضح واستقرار فوق 55. '
+    + 'لا تقترح معاهدة من نوع سارٍ أصلًا مع نفس الدولة. التجسس مكلف وقد يُكشف فيهبط سمعتك.';
+  const raw = await llmChat([
+    { role: 'system', content: sys },
+    { role: 'user', content: 'حالة الدولة هذا الشهر (أرقام بالمليون دولار والجنود):\n' + JSON.stringify(state) },
+  ], { timeoutMs: 30000 });
+  const d = llmParseJSON(raw);
+  const notes = [];
+  const A = LLM_ACTOR;
+  const liqOf = async () => Number((await one('SELECT liquidity_m_usd FROM country_economy WHERE country_code=$1', [cc])).liquidity_m_usd) || 0;
+  // صيانة حتمية: جباية + جمع إنتاج
+  try { await collectTaxesInternal(cc, A); } catch (err) { /* جُبيت مسبقًا */ }
+  for (const c of comps) { try { await collectCompanyInternal(c.id, A); } catch (err) { /* نفد أو جُمع */ } }
+  let liq = await liqOf();
+  // 1) الضريبة — بحد 30%
+  if (Number.isFinite(d.tax_rate)) {
+    const t = Math.max(0, Math.min(30, Math.round(d.tax_rate)));
+    if (t !== tax) { await setCountryTax(cc, t, A, null); notes.push('ضريبة ' + t + '%'); }
+  }
+  // 2) الرد على المعاهدات المعلقة — عبر نفس المسار الموحد
+  if (Array.isArray(d.treaty_decisions)) {
+    for (const td of d.treaty_decisions.slice(0, 10)) {
+      const t = pending.find((p) => Number(p.id) === Number(td.id));
+      if (!t) continue;
+      await respondTreaty({ ...t, to_code: cc }, !!td.accept, A);
+      notes.push((td.accept ? 'قبول ' : 'رفض ') + (TREATY_TYPES[t.type] || t.type));
+    }
+  }
+  // 3) التجنيد — سقف 20000 و4 آلاف دولار للجندي
+  if (Number.isFinite(d.recruit)) {
+    const pct = { conservative: 0.004, balanced: 0.007, expansionist: 0.012 }[strategy] || 0.007;
+    const targetSoldiers = Math.round(pop * pct);
+    const mil = await getArmy(cc);
+    let need = Math.max(0, Math.min(20000, Math.round(d.recruit)));
+    need = Math.min(need, Math.max(0, targetSoldiers - mil.soldiers)); // لا يتجاوز الهدف السكاني
+    const cost = Math.round(need * 0.004 * 100) / 100;
+    if (need > 0 && liq >= cost && await deductLiquidity(cc, cost)) {
+      await setArmyStat(cc, { soldiers: mil.soldiers + need });
+      await logLiq(cc, -cost, `تجنيد ${need.toLocaleString('en-US')} جندي`, A);
+      await audit('army_recruit', A, `${cname(cc)}: تجنيد ${need.toLocaleString('en-US')} جندي`);
+      liq = await liqOf(); notes.push('تجنيد ' + need);
+    }
+  }
+  // 4) التدريب — 30 مليونًا
+  if (d.train === true) {
+    const mil = await getArmy(cc);
+    if (mil.training < 95 && liq > 500 && await deductLiquidity(cc, 30)) {
+      await setArmyStat(cc, { training: Math.min(100, mil.training + 3) });
+      await logLiq(cc, -30, 'برنامج تدريب عسكري', A);
+      liq = await liqOf(); notes.push('تدريب');
+    }
+  }
+  // 5) تأسيس شركة — نفس شروط القاعدي
+  if (d.found_company === true && liq > 400 && comps.length < 6) {
+    try { await aiFoundCompany(cc, liq); liq = await liqOf(); notes.push('شركة جديدة'); } catch (err) { /* بلا احتياطي */ }
+  }
+  // 6) معاهدات جديدة — proposeTreaty يرفض المكرر والذاتي
+  if (Array.isArray(d.treaties)) {
+    for (const pt of d.treaties.slice(0, 3)) {
+      const to = String(pt.to || '').toUpperCase();
+      const type = String(pt.type || '');
+      if (!['non_aggression', 'trade', 'alliance', 'defensive'].includes(type)) continue;
+      if (to === cc || !COUNTRIES.some((c) => c.code === to)) continue;
+      try { await proposeTreaty(cc, to, type, 0, A); notes.push('معاهدة ' + type + ' مع ' + cname(to)); }
+      catch (err) { /* مكررة أو محظورة */ }
+    }
+  }
+  // 7) التجسس — نفس القيود والحد الشهري
+  if (d.spy && typeof d.spy.target === 'string') {
+    const tg = d.spy.target.toUpperCase();
+    const kind = d.spy.kind === 'stability' ? 'stability' : 'economy';
+    if (tg !== cc && COUNTRIES.some((c) => c.code === tg) && liq > 200) {
+      try { await runSpyOp(cc, tg, kind, A); notes.push('تجسس على ' + cname(tg)); }
+      catch (err) { /* حد شهري أو سيولة */ }
+    }
+  }
+  // 8) إعلان الحرب — نفس البوابات الصارمة للقاعدي
+  if (typeof d.declare_war === 'string' && d.declare_war) {
+    const tc = d.declare_war.toUpperCase();
+    const mil = await getArmy(cc);
+    const gates = strategy !== 'conservative' && wars.length === 0 && stab > 55
+      && mil.soldiers > 30000 && mil.readiness > 60
+      && tc !== cc && COUNTRIES.some((c) => c.code === tc);
+    if (gates) {
+      const ta = await getArmy(tc);
+      const blocked = await one(`SELECT id FROM treaties WHERE status='active'
+        AND ((from_code=$1 AND to_code=$2) OR (from_code=$2 AND to_code=$1))
+        AND type IN ('non_aggression','alliance','defensive')`, [cc, tc]);
+      if (ta.soldiers <= mil.soldiers * 0.6 && !blocked && !(await activeWarBetween(cc, tc))) {
+        try { await declareWarInternal(cc, tc, A); notes.push('حرب على ' + cname(tc)); }
+        catch (err) { /* رفضها المحرك */ }
+      }
+    }
+  }
+  await audit('ai_llm_turn', A, `${cname(cc)}: دور لغوي — ${notes.length ? notes.join('، ') : 'مراقبة بلا تغيير'}${d.reason ? ' — ' + String(d.reason).slice(0, 140) : ''}`);
+  return true;
+}
+// رد السفارة عبر النموذج — نص طبيعي + فعل آمن واحد
+async function llmEmbassyReply(playerCC, aiCC, body) {
+  const strategy = aiStrategyFor(aiCC);
+  const w = await activeWarBetween(aiCC, playerCC);
+  const trs = await all(`SELECT type FROM treaties WHERE status='active'
+    AND ((from_code=$1 AND to_code=$2) OR (from_code=$2 AND to_code=$1))`, [aiCC, playerCC]);
+  const sys = 'أنت الحاكم الأعلى لدولة ' + cname(aiCC) + ' سنة 1900، شخصيتك: ' + strategy
+    + '. وصلتك رسالة دبلوماسية من حاكم ' + cname(playerCC) + '. رد بعربية فصيحة موجزة (جملتان فقط) بأسلوب يليق بشخصيتك. '
+    + 'أجب JSON فقط: {"reply": "نص الرد", "action": "none|non_aggression|trade|alliance|peace"} — '
+    + 'اختر peace فقط إن كنتم في حرب وتريد إنهاءها، ومعاهدة فقط إن لم تكن سارية.';
+  const ctx = 'السياق: ' + (w ? 'في حرب نشطة بيننا' : 'لا حرب بيننا')
+    + '. معاهدات سارية: ' + (trs.map((t) => t.type).join('، ') || 'لا شيء')
+    + '. الرسالة: "' + String(body).slice(0, 500) + '"';
+  const d = llmParseJSON(await llmChat(
+    [{ role: 'system', content: sys }, { role: 'user', content: ctx }],
+    { maxTokens: 600, temperature: 0.8, timeoutMs: 20000 }
+  ));
+  const reply = String(d.reply || '').slice(0, 1000);
+  if (!reply) throw new Error('LLM_EMPTY_REPLY');
+  return { reply, action: d.action };
+}
+
 // الدور الشهري للدول الذكية — يُستدعى من المحرك الشهري لكل شهر لعبة منقضٍ
 async function aiNationsTick(monthIdx) {
+  const useLLM = await llmEnabled();
   let rows;
   try {
     rows = await all(`SELECT country_code, strategy FROM ai_nations
@@ -3745,13 +4047,37 @@ async function aiNationsTick(monthIdx) {
         await audit('ai_nation', AI_ACTOR, `${cname(cc)}: توقف الحاكم الذكي — الدولة أصبحت بيد لاعب`);
         continue;
       }
-      await aiGovern(cc, r.strategy || 'balanced');
+      // 🧠 الحاكم اللغوي أولًا — عند أي فشل يعود القاعدي تلقائيًا
+      let handled = false;
+      if (useLLM) {
+        try { handled = await llmGovernTurn(cc, monthIdx); }
+        catch (e) { handled = false; }
+      }
+      if (!handled) await aiGovern(cc, r.strategy || 'balanced');
     } catch (e) { console.error('AI govern:', cc, e.message); }
     await q('UPDATE ai_nations SET last_tick_month=$2, updated_at=$3 WHERE country_code=$1', [cc, monthIdx, Date.now()]);
   }
 }
 // دور واحد لدولة ذكية — كأن لاعبًا حقيقيًا يديرها: اقتصاد + جيش + دبلوماسية + استخبارات
 // الحاكم الذكي لاعب كامل: حروب محسوبة ومعاهدات وتجسس تشمل البشر — باحتمالات شهرية منخفضة وشروط صارمة
+// الرد على معاهدة معروضة — قبول أو رفض بنفس الآثار للجميع (قاعدي ولغوي وبشري)
+async function respondTreaty(t, accept, actor) {
+  const g = await gameNow();
+  const cc = t.to_code;
+  if (accept) {
+    await q(`UPDATE treaties SET status='active', decided_game_time=$1 WHERE id=$2`, [g, t.id]);
+    await emitEvent('treaty_signed', t.from_code, t.to_code,
+      `توقيع ${TREATY_TYPES[t.type]} بين ${cname(t.from_code)} و${cname(t.to_code)}`, { treaty_id: t.id });
+    await audit('treaty_accept', actor, `${cname(cc)} قبلت ${TREATY_TYPES[t.type]} من ${cname(t.from_code)}`);
+    await notifyCountry(t.from_code, 'treaty', `قُبِلت معاهدتك!`,
+      `${cname(t.to_code)} قبلت: ${TREATY_TYPES[t.type]}.`, '#/news');
+  } else {
+    await q(`UPDATE treaties SET status='rejected', decided_game_time=$1 WHERE id=$2`, [g, t.id]);
+    await audit('treaty_reject', actor, `${cname(cc)} رفضت ${TREATY_TYPES[t.type] || t.type} من ${cname(t.from_code)}`);
+    await notifyCountry(t.from_code, 'treaty', `رُفِضت معاهدتك`,
+      `${cname(t.to_code)} رفضت: ${TREATY_TYPES[t.type]}.`, '#/news');
+  }
+}
 async function aiGovern(cc, strategy, actor = AI_ACTOR, domains = null) {
   const e = await one('SELECT * FROM country_economy WHERE country_code=$1', [cc]);
   if (!e || e.revolt_active) return; // ثورة شعبية = شلل — لا جباية ولا استثمار
@@ -3828,19 +4154,10 @@ async function aiGovern(cc, strategy, actor = AI_ACTOR, domains = null) {
   // الرد على العروض المعلقة: قبول عدم الاعتداء دائمًا، والتجاري غالبًا، ورفض الباقي
   const pending = await all(`SELECT * FROM treaties WHERE to_code=$1 AND status='proposed'`, [cc]);
   for (const t of pending) {
-    const g = await gameNow();
     if (t.type === 'non_aggression' || (t.type === 'trade' && Math.random() < 0.6)) {
-      await q(`UPDATE treaties SET status='active', decided_game_time=$1 WHERE id=$2`, [g, t.id]);
-      await emitEvent('treaty_signed', t.from_code, t.to_code,
-        `توقيع ${TREATY_TYPES[t.type]} بين ${cname(t.from_code)} و${cname(t.to_code)}`, { treaty_id: t.id });
-      await audit('treaty_accept', actor, `${cname(cc)} قبلت ${TREATY_TYPES[t.type]} من ${cname(t.from_code)}`);
-      await notifyCountry(t.from_code, 'treaty', `قُبِلت معاهدتك!`,
-        `${cname(t.to_code)} قبلت: ${TREATY_TYPES[t.type]}.`, '#/news');
+      await respondTreaty(t, true, actor);
     } else if (['alliance', 'defensive', 'military_access', 'embargo'].includes(t.type)) {
-      await q(`UPDATE treaties SET status='rejected', decided_game_time=$1 WHERE id=$2`, [g, t.id]);
-      await audit('treaty_reject', actor, `${cname(cc)} رفضت ${TREATY_TYPES[t.type] || t.type} من ${cname(t.from_code)}`);
-      await notifyCountry(t.from_code, 'treaty', `رُفِضت معاهدتك`,
-        `${cname(t.to_code)} رفضت: ${TREATY_TYPES[t.type]}.`, '#/news');
+      await respondTreaty(t, false, actor);
     }
   }
   // مبادرة محسوبة: معاهدة مع دولة ذكية أخرى فقط (10% شهريًا — بلا إزعاج للبشر)

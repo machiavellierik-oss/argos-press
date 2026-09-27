@@ -1037,7 +1037,7 @@ async function vEconomy() {
         <i>${esc(e.currency_name || '—')} · ${rate}</i>
         <i>السيولة: ${e.liquidity_m_usd == null ? '—' : fmtRate(e.liquidity_m_usd) + ' مليون $'}</i>
         <i>${e.companies_count ? `🏭 ${e.companies_count} شركات` : 'لا شركات بعد'}</i>
-        ${e.ai_governed ? '<i>🤖 تُدار بحاكم ذكي</i>' : ''}</span>
+        ${e.ai_governed ? (e.ai_llm ? '<i>🧠 تُدار بذكاء اصطناعي حقيقي</i>' : '<i>🤖 تُدار بحاكم ذكي</i>') : ''}</span>
       </a>`;
     }).join('') + '</div>';
 }
@@ -2083,6 +2083,27 @@ async function renderAdminTab(body) {
     <div class="field"><label>كلمة سر جديدة لحساب المطورين</label>
       <input id="devpass" type="password" placeholder="6 أحرف على الأقل" autocomplete="new-password"></div>
     <button class="btn" style="width:auto;padding:10px 32px" onclick="setDevPassword()">تعيين كلمة السر</button>
+    <div class="sec-h" style="margin-top:18px">🧠 الذكاء الاصطناعي الحقيقي (نموذج لغوي)</div>
+    <p class="hint">نموذج لغوي حقيقي يحكم الدول الذكية كل شهر لعبة ويرد في السفارات — المحرك يتحقق من كل قرار قبل تنفيذه، وعند أي عطل يعود الحاكم القاعدي تلقائيًا. الخياران الأولان مجانيان تمامًا بلا حساب ولا مفتاح.</p>
+    <div id="aimsg"></div>
+    <div class="field"><label><input type="checkbox" id="llm_on" style="width:auto"> تفعيل الحاكم اللغوي</label></div>
+    <div class="field"><label>المزوّد</label>
+      <select id="llm_provider">
+        <option value="pollinations">Pollinations — مجاني بلا مفتاح ✓</option>
+        <option value="llm7">LLM7 — مجاني بلا حساب ✓</option>
+        <option value="groq">Groq — طبقة مجانية (مفتاح مجاني)</option>
+        <option value="gemini">Gemini — طبقة مجانية (مفتاح مجاني)</option>
+        <option value="openrouter">OpenRouter — مدفوع</option>
+      </select></div>
+    <div class="field"><label>النموذج</label>
+      <input id="llm_model" dir="ltr" placeholder="openai"></div>
+    <div class="field"><label>مفتاح API (يُحفظ في السيرفر فقط — غير مطلوب للمجانيين)</label>
+      <input id="llm_key" type="password" dir="ltr" placeholder="اتركه فارغًا للمزوّد المجاني" autocomplete="new-password"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn" style="width:auto;padding:10px 24px" onclick="saveAiConfig()">حفظ الإعداد</button>
+      <button class="btn" style="width:auto;padding:10px 24px" onclick="testAiConfig()">اختبار الاتصال</button>
+    </div>
+    <p class="hint" id="llm_status"></p>
     <div class="sec-h" style="margin-top:18px">صيانة المحاكاة</div>
     <p class="hint">أدوات خطيرة — للمطورين فقط. تصفير الشركات يحذف كل الشركات نهائيًا ولا رجعة فيه.</p>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
@@ -2109,6 +2130,7 @@ async function renderAdminTab(body) {
           + `<button class="btn danger" style="width:auto;padding:8px 14px" onclick="kickUser(${u.id},'${esc(u.username)}')">${ICONS.trash} طرد</button>`;
       return `<div class="row-item"><span class="grow">${c.flag} <b>${esc(u.username)}</b> <span class="hint">${esc(c.name)}${roleTag}${u.banned ? ` · ${ICONS.ban} محظور` : ''}</span></span>${actions}</div>`;
     }).join('') || '<p class="hint">لا يوجد مستخدمون.</p>') + `</div></div>`;
+  loadAiConfig();
 }
 async function setHqPassword() {
   const p = document.getElementById('hqpass').value;
@@ -2125,6 +2147,43 @@ async function setDevPassword() {
     msg('تم تعيين كلمة سر حساب المطورين ✓', true);
     document.getElementById('devpass').value = '';
   } catch (e) { msg(e.message, false); }
+}
+async function loadAiConfig() {
+  try {
+    const c = await api('GET', '/admin/ai-config');
+    document.getElementById('llm_on').checked = !!c.enabled;
+    document.getElementById('llm_provider').value = c.provider || 'pollinations';
+    document.getElementById('llm_model').value = c.model || '';
+    document.getElementById('llm_model').placeholder = c.model || 'openai';
+    const free = c.provider === 'pollinations' || c.provider === 'llm7';
+    document.getElementById('llm_status').textContent = c.has_key
+      ? `المفتاح محفوظ (ينتهي بـ ${c.key_tail}) — الحالة: ${c.enabled ? 'مفعّل 🧠' : 'متوقف'}`
+      : free
+        ? `المزوّد ${c.provider} مجاني بلا مفتاح — الحالة: ${c.enabled ? 'مفعّل 🧠' : 'متوقف'}`
+        : 'هذا المزوّد يحتاج مفتاح API مجانيًا — أدخله واحفظ.';
+  } catch (e) { /* صامت */ }
+}
+async function saveAiConfig() {
+  const m = document.getElementById('aimsg');
+  try {
+    await api('POST', '/admin/ai-config', {
+      enabled: document.getElementById('llm_on').checked,
+      provider: document.getElementById('llm_provider').value,
+      model: document.getElementById('llm_model').value.trim(),
+      api_key: document.getElementById('llm_key').value.trim(),
+    });
+    document.getElementById('llm_key').value = '';
+    m.innerHTML = '<p class="hint" style="color:var(--green,#4caf50)">تم الحفظ ✓</p>';
+    loadAiConfig();
+  } catch (e) { m.innerHTML = `<p class="hint" style="color:#e74c3c">${esc(e.message)}</p>`; }
+}
+async function testAiConfig() {
+  const st = document.getElementById('llm_status');
+  st.textContent = 'جارٍ الاختبار…';
+  try {
+    const r = await api('POST', '/admin/ai-test', {});
+    st.textContent = `الاتصال ناجح ✓ — ${r.provider}: ${r.model} (${r.ms}ms)`;
+  } catch (e) { st.textContent = 'فشل: ' + e.message; }
 }
 async function wipeCompanies() {
   if (!confirm('تحذير: سيتم حذف جميع الشركات نهائيًا. متأكد؟')) return;
