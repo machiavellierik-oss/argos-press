@@ -17,6 +17,7 @@
 
   /* --- طبقات السطح (بدل --card/--panel المتضاربين) --- */
   --surface-1:#16181c;   /* بطاقات، فقاعات، حقول */
+  --surface-0:#0a0a0a;   /* أسطح غامقة كاملة الشاشة (عارض الستوري...) */
   --surface-2:#1c1f23;   /* هوفر على السطح 1 */
   --card:var(--surface-1);        /* تعريف الاسم المستخدم فعليًا في الكود — كان بلا قيمة */
   --border:var(--line);           /* نفس الشيء لـ --border */
@@ -77,7 +78,7 @@ button{font-family:inherit;cursor:pointer}
   font-size:1.02rem;padding:14px 20px;border-radius:999px;display:flex;align-items:center;
   justify-content:center;gap:10px;transition:.2s;box-shadow:0 4px 18px rgba(29,155,240,.3);width:92%}
 .compose-btn:hover{background:var(--accent-hover)}
-.compose-btn svg{width:22px;height:22px}
+.compose-btn svg{width:var(--ic-md);height:var(--ic-md)}
 .nav-user{margin-top:auto;display:flex;align-items:center;gap:10px;padding:10px 12px;
   border-radius:999px;transition:.2s;width:100%;background:none;border:none;color:var(--text);text-align:start}
 .nav-user:hover{background:var(--hover)}
@@ -88,7 +89,7 @@ button{font-family:inherit;cursor:pointer}
 .nav-user .nu-go{color:var(--muted);font-size:1.1rem}
 
 /* الأفاتار */
-.av{width:46px;height:46px;border-radius:50%;background:#16181c;border:1px solid var(--line);
+.av{width:46px;height:46px;border-radius:50%;background:var(--surface-1);border:1px solid var(--line);
   display:flex;align-items:center;justify-content:center;font-size:1.55rem;flex-shrink:0;overflow:hidden}
 .av img{width:100%;height:100%;object-fit:cover}
 
@@ -135,7 +136,7 @@ button{font-family:inherit;cursor:pointer}
 .tw-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:.92rem}
 .tw-name{font-weight:800;white-space:nowrap}
 .tw-name:hover{text-decoration:underline}
-.vbadge{width:18px;height:18px;flex-shrink:0;color:var(--accent)}
+.vbadge{width:var(--ic-sm);height:var(--ic-sm);flex-shrink:0;color:var(--accent)}
 .vbadge.gold{color:var(--gold)}
 .tw-handle{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tw-del{margin-inline-start:auto;background:none;border:none;color:var(--muted);width:36px;height:36px;
@@ -152,7 +153,7 @@ button{font-family:inherit;cursor:pointer}
 .tw-act{display:flex;align-items:center;gap:7px;background:none;border:none;color:var(--muted);
   font-size:.8rem;transition:.2s;padding:6px}
 .tw-act .a-ic{width:33px;height:33px;border-radius:50%;display:flex;align-items:center;justify-content:center;transition:.2s}
-.tw-act svg{width:18px;height:18px}
+.tw-act svg{width:var(--ic-sm);height:var(--ic-sm)}
 .tw-act.reply:hover{color:var(--accent)}.tw-act.reply:hover .a-ic{background:rgba(29,155,240,.12)}
 .tw-act.repost:hover{color:var(--green)}.tw-act.repost:hover .a-ic{background:rgba(0,186,124,.12)}
 .tw-act.like:hover{color:var(--red)}.tw-act.like:hover .a-ic{background:rgba(244,33,46,.12)}
@@ -210,14 +211,14 @@ button{font-family:inherit;cursor:pointer}
 .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--text);width:auto;padding:9px 22px;font-size:.9rem}
 .btn.ghost:hover{background:var(--hover)}
 .err{background:rgba(244,33,46,.1);color:#ff7a85;border:1px solid rgba(244,33,46,.35);
-  padding:11px 15px;border-radius:12px;margin-bottom:14px;font-size:.9rem}
+  padding:11px 15px;border-radius:var(--r-md);margin-bottom:14px;font-size:.9rem}
 .okmsg{background:rgba(0,186,124,.1);color:#4fe3a5;border:1px solid rgba(0,186,124,.35);
-  padding:11px 15px;border-radius:12px;margin-bottom:14px;font-size:.9rem}
+  padding:11px 15px;border-radius:var(--r-md);margin-bottom:14px;font-size:.9rem}
 .hint{font-size:.82rem;color:var(--muted)}
 .auth .swap{margin-top:18px;color:var(--muted);font-size:.9rem;text-align:center}
 .auth .swap a{color:var(--accent)}
 .filebtn{display:inline-flex;align-items:center;gap:8px;color:var(--accent);border:1px dashed rgba(29,155,240,.5);
-  border-radius:12px;padding:10px 16px;font-size:.9rem;cursor:pointer;transition:.2s}
+  border-radius:var(--r-md);padding:10px 16px;font-size:.9rem;cursor:pointer;transition:.2s}
 .filebtn:hover{background:rgba(29,155,240,.08)}
 
 /* ===== الملف الشخصي (لوحة التحكم) ===== */
@@ -227,7 +228,7 @@ button{font-family:inherit;cursor:pointer}
   font-size:4.4rem;opacity:.35}
 .prow{padding:0 18px}
 .p-av{width:128px;height:128px;border-radius:50%;border:4px solid #000;margin-top:-64px;
-  background:#16181c;display:flex;align-items:center;justify-content:center;font-size:3.4rem;overflow:hidden;position:relative}
+  background:var(--surface-1);display:flex;align-items:center;justify-content:center;font-size:3.4rem;overflow:hidden;position:relative}
 .p-av img{width:100%;height:100%;object-fit:cover}
 .p-head{display:flex;align-items:flex-start;gap:10px;margin-top:10px}
 .p-id{flex:1;min-width:0}
@@ -250,12 +251,12 @@ button{font-family:inherit;cursor:pointer}
 /* ===== الودجت الجانبية ===== */
 .widgets{width:350px;flex-shrink:0;padding:8px 26px 20px 8px}
 .w-search{position:sticky;top:0;background:#000;padding:8px 0 10px;z-index:30}
-.w-search .s-box{display:flex;align-items:center;gap:10px;background:#16181c;border:1px solid transparent;
+.w-search .s-box{display:flex;align-items:center;gap:10px;background:var(--surface-1);border:1px solid transparent;
   border-radius:999px;padding:10px 18px;transition:.2s}
 .w-search .s-box:focus-within{border-color:var(--accent);background:#000}
-.w-search svg{width:18px;height:18px;color:var(--muted);flex-shrink:0}
+.w-search svg{width:var(--ic-sm);height:var(--ic-sm);color:var(--muted);flex-shrink:0}
 .w-search input{flex:1;background:none;border:none;outline:none;color:var(--text);font-family:inherit;font-size:.95rem}
-.w-card{background:#16181c;border-radius:var(--r);margin-bottom:16px;overflow:hidden;border:1px solid #16181c}
+.w-card{background:var(--surface-1);border-radius:var(--r);margin-bottom:16px;overflow:hidden;border:1px solid var(--surface-1)}
 .w-card h3{font-size:1.15rem;font-weight:800;padding:14px 18px 6px}
 .w-trend{display:block;padding:9px 18px;transition:.2s;cursor:pointer}
 .w-trend:hover{background:rgba(255,255,255,.04)}
@@ -283,7 +284,7 @@ button{font-family:inherit;cursor:pointer}
 @keyframes sp{to{transform:rotate(360deg)}}
 
 /* ===== ملفات العملاء — الطابع الاستخباراتي ===== */
-.dossier{background:linear-gradient(180deg,#f8f5ee,#ece5d2);color:#1c1a15;border-radius:12px;
+.dossier{background:linear-gradient(180deg,#f8f5ee,#ece5d2);color:#1c1a15;border-radius:var(--r-md);
   margin:14px;padding:26px;position:relative;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.5)}
 .dossier::before{content:'';position:absolute;inset:0;pointer-events:none;
   background:repeating-linear-gradient(0deg,transparent 0 3px,rgba(120,100,60,.05) 3px 4px)}
@@ -295,7 +296,7 @@ button{font-family:inherit;cursor:pointer}
   display:flex;align-items:center;justify-content:center;overflow:hidden}
 .dos-photo img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:grayscale(.3) contrast(1.05)}
 .dos-photo-flag{font-size:5.4rem;filter:drop-shadow(0 6px 14px rgba(0,0,0,.5))}
-.cnr{position:absolute;width:26px;height:26px;border:3px solid #1e50c8;z-index:2}
+.cnr{position:absolute;width:var(--ic-lg);height:var(--ic-lg);border:3px solid #1e50c8;z-index:2}
 .cnr.tl{top:10px;inset-inline-start:10px;border-width:3px 0 0 3px}
 .cnr.tr{top:10px;inset-inline-end:10px;border-width:3px 3px 0 0}
 .cnr.bl{bottom:10px;inset-inline-start:10px;border-width:0 0 3px 3px}
@@ -335,7 +336,7 @@ button{font-family:inherit;cursor:pointer}
 .dos-card .dc-n{font-weight:800;font-size:1.02rem}
 .dos-card .dc-s{color:var(--muted);font-size:.83rem}
 .check-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px;
-  max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:12px;padding:12px;background:#0a0a0a}
+  max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:var(--r-md);padding:12px;background:var(--surface-0)}
 .check-grid label{display:flex;align-items:center;gap:7px;font-size:.86rem;cursor:pointer;padding:4px 6px;border-radius:8px}
 .check-grid label:hover{background:var(--hover)}
 .check-grid input{accent-color:var(--accent);width:16px;height:16px}
@@ -364,8 +365,8 @@ button{font-family:inherit;cursor:pointer}
   .timeline{width:100%;max-width:100%;border:none}
   .bottomnav{display:flex;position:fixed;bottom:0;inset-inline:0;z-index:60;background:rgba(0,0,0,.85);
     backdrop-filter:blur(14px);border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
-  .bottomnav a{flex:1;display:flex;align-items:center;justify-content:center;padding:10px;color:var(--muted);border-radius:12px}
-  .bottomnav a svg{width:26px;height:26px}
+  .bottomnav a{flex:1;display:flex;align-items:center;justify-content:center;padding:10px;color:var(--muted);border-radius:var(--r-md)}
+  .bottomnav a svg{width:var(--ic-lg);height:var(--ic-lg)}
   .bottomnav a.active{color:var(--text)}
   body{padding-bottom:64px}
   .cover{height:130px}
@@ -392,10 +393,10 @@ button{font-family:inherit;cursor:pointer}
 .modal-card{background:var(--bg);border:1px solid var(--line);border-radius:16px;padding:18px;width:100%;max-width:440px}
 .m-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;font-weight:800}
 .m-x{background:none;border:none;color:var(--muted);font-size:1.1rem;cursor:pointer}
-.modal-card textarea{width:100%;background:var(--card);border:1px solid var(--line);border-radius:12px;color:var(--ink);padding:12px;font-size:1rem;font-family:inherit;resize:vertical;margin-bottom:10px}
+.modal-card textarea{width:100%;background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);color:var(--ink);padding:12px;font-size:1rem;font-family:inherit;resize:vertical;margin-bottom:10px}
 /* عارض الستوري */
 .sview-ov{position:fixed;inset:0;background:#000;z-index:300;display:flex;align-items:center;justify-content:center}
-.sview{position:relative;width:100%;max-width:420px;height:92vh;max-height:760px;background:#111;overflow:hidden;display:flex;flex-direction:column}
+.sview{position:relative;width:100%;max-width:420px;height:92vh;max-height:760px;background:var(--surface-0);overflow:hidden;display:flex;flex-direction:column}
 .sv-prog{display:flex;gap:4px;padding:10px;position:absolute;top:0;left:0;right:0;z-index:4}
 .sv-prog span{flex:1;height:3px;background:rgba(255,255,255,.3);border-radius:2px;overflow:hidden}
 .sv-prog i{display:block;height:100%;width:0;background:#fff;border-radius:2px}
@@ -426,7 +427,7 @@ button{font-family:inherit;cursor:pointer}
 .ring-img{width:100%;height:100%;border-radius:50%;object-fit:cover}
 .p-av img{width:100%;height:100%;border-radius:50%;object-fit:cover}
 .pav-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-.m-input{width:100%;box-sizing:border-box;background:#000;border:1px solid var(--line);border-radius:12px;color:var(--ink);padding:10px 14px;margin-bottom:10px;outline:none;font-family:inherit}
+.m-input{width:100%;box-sizing:border-box;background:#000;border:1px solid var(--line);border-radius:var(--r-md);color:var(--ink);padding:10px 14px;margin-bottom:10px;outline:none;font-family:inherit}
 .m-input:focus{border-color:var(--accent)}
 
 /* ===== الرسائل الخاصة (ماسنجر) ===== */
@@ -467,9 +468,9 @@ button{font-family:inherit;cursor:pointer}
 .war-legend{display:flex;gap:14px;font-size:12.5px;color:#cfd6dd}
 .war-legend .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-inline-end:5px;box-shadow:0 0 8px currentColor}
 .war-sec{margin:18px 16px}
-.war-sec-t{font-size:16px;font-weight:800;margin-bottom:10px;padding-inline-start:10px;border-inline-start:3px solid var(--red)}
+.war-sec-t{font-size:16px;font-weight:800;margin-bottom:10px;padding-inline-start:4px;border-inline-start:3px solid var(--red);padding-inline-start:10px}
 .war-table{display:flex;flex-direction:column;gap:8px}
-.war-row{display:grid;grid-template-columns:auto 1fr auto;grid-template-areas:"flag name sev" "flag nums trend";gap:2px 10px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px;border-inline-start:3px solid}
+.war-row{display:grid;grid-template-columns:auto 1fr auto;grid-template-areas:"flag name sev" "flag nums trend";gap:2px 10px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-md);padding:10px 14px;border-inline-start:3px solid}
 .war-row.sev-RED{border-inline-start-color:#f4212e}
 .war-row.sev-ORANGE{border-inline-start-color:#ff9f0a}
 .war-row.sev-YELLOW{border-inline-start-color:#ffd400}
@@ -528,17 +529,17 @@ button{font-family:inherit;cursor:pointer}
 .e-ic svg{width:46px;height:46px;opacity:.55}
 .empty .e-ic{display:block;margin-bottom:10px}
 .clock-head{display:flex;align-items:center;gap:8px;font-weight:800}
-.clock-head svg{width:22px;height:22px}
+.clock-head svg{width:var(--ic-md);height:var(--ic-md)}
 .wb-ic{display:inline-flex}
-.wb-ic svg{width:26px;height:26px}
+.wb-ic svg{width:var(--ic-lg);height:var(--ic-lg)}
 .tw-cat svg{width:14px;height:14px;vertical-align:-2px}
 .dos-star{display:inline-flex;color:var(--accent)}
-.dos-star svg{width:18px;height:18px}
-.row-item .grow svg{width:18px;height:18px;vertical-align:-3px}
+.dos-star svg{width:var(--ic-sm);height:var(--ic-sm)}
+.row-item .grow svg{width:var(--ic-sm);height:var(--ic-sm);vertical-align:-3px}
 .conv-last svg{width:14px;height:14px;vertical-align:-2px}
 .p-meta svg{width:14px;height:14px;vertical-align:-2px}
-.form-dark h2 svg{width:22px;height:22px;vertical-align:-4px}
-.backrow .thead-title svg{width:18px;height:18px}
+.form-dark h2 svg{width:var(--ic-md);height:var(--ic-md);vertical-align:-4px}
+.backrow .thead-title svg{width:var(--ic-sm);height:var(--ic-sm)}
 .field label svg{width:16px;height:16px;vertical-align:-3px}
 .dot-live{display:inline-block;width:10px;height:10px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e;animation:pulse 1.6s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
@@ -567,12 +568,17 @@ button{font-family:inherit;cursor:pointer}
 .ig-tile img{width:100%;height:100%;object-fit:cover;display:block}
 
 /* ---------- إعلانات الحرب والطوارئ ---------- */
-.st-badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:.72rem;font-weight:800;white-space:nowrap}
+/* قاعدة موحّدة لكل الشارات (حالة/تصنيف/ثقة) — الألوان تبقى خاصة بكل نوع */
+.st-badge,.co-badge,.conf-badge{
+  display:inline-block;padding:3px 10px;border-radius:var(--r-pill);
+  font-size:.72rem;font-weight:800;white-space:nowrap;vertical-align:middle;
+}
+.st-badge{white-space:nowrap}
 .st-war{background:rgba(244,33,46,.14);color:#ff7b84;border:1px solid #f4212e}
 .st-emergency{background:rgba(255,159,10,.14);color:#ffb84d;border:1px solid #ff9f0a}
 .st-peace{background:rgba(34,197,94,.14);color:#4ade80;border:1px solid #22c55e}
 .wdecl-list{display:flex;flex-direction:column;gap:8px}
-.wdecl{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--hover);border-radius:12px}
+.wdecl{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--hover);border-radius:var(--r-md)}
 .wdecl-tx{flex:1;display:flex;flex-direction:column;gap:2px}
 .wdecl-tx time{font-size:.75rem;color:var(--muted)}
 .wdecl-occ{font-size:.8rem;color:#ff8a8a}
@@ -588,7 +594,7 @@ button{font-family:inherit;cursor:pointer}
 #me-geotext{font-family:monospace;font-size:.75rem;min-height:110px}
 /* جيوش الدول وتسليح 1900 */
 .army-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
-.army-card{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--hover);border-radius:12px;text-decoration:none;color:inherit}
+.army-card{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--hover);border-radius:var(--r-md);text-decoration:none;color:inherit}
 .army-card:hover{outline:1px solid var(--gold)}
 .army-card-tx{display:flex;flex-direction:column;gap:2px;min-width:0}
 .army-card-tx b{font-size:.9rem}
@@ -598,7 +604,7 @@ button{font-family:inherit;cursor:pointer}
 .army-hero h2{margin:0 0 4px}
 .army-count{font-size:1.15rem;font-weight:700;color:var(--gold);margin:0}
 .wpn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
-.wpn-card{background:var(--hover);border-radius:12px;overflow:hidden}
+.wpn-card{background:var(--hover);border-radius:var(--r-md);overflow:hidden}
 .wpn-card img{width:100%;height:130px;object-fit:cover;display:block}
 .wpn-noimg{height:90px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:2rem}
 .wpn-tx{padding:10px 12px;display:flex;flex-direction:column;gap:3px;font-size:.85rem}
@@ -606,7 +612,6 @@ button{font-family:inherit;cursor:pointer}
 .wpn-tx span{color:var(--muted)}
 .wpn-qty{color:var(--gold)!important;font-weight:700}
 .wpn-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.conf-badge{font-size:.7rem;padding:2px 8px;border-radius:20px;font-weight:700}
 .conf-documented{background:rgba(48,209,88,.15);color:#30d158}
 .conf-estimate{background:rgba(255,159,10,.15);color:#ff9f0a}
 .conf-unknown{background:rgba(142,142,147,.15);color:#98989f}
@@ -619,23 +624,23 @@ button{font-family:inherit;cursor:pointer}
 .econ-hero-stats{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}
 
 /* --- الاقتصاد: الشركات + سوق السلاح + الإشعارات --- */
-.co-badge{display:inline-block;font-size:.72rem;font-weight:700;padding:2px 10px;border-radius:999px;margin-inline-start:6px;vertical-align:middle}
+.co-badge{margin-inline-start:6px}
 .co-badge.national{background:rgba(46,160,90,.18);color:#4ade80;border:1px solid rgba(46,160,90,.4)}
 .co-badge.international{background:rgba(90,140,250,.16);color:#7aa5ff;border:1px solid rgba(90,140,250,.4)}
-.co-badge.pend{background:rgba(250,190,60,.15);color:#fbbf24;border:1px solid rgba(250,90,90,.4)}
+.co-badge.pend{background:rgba(250,190,60,.15);color:#fbbf24;border:1px solid rgba(250,190,60,.4)}
 .co-badge.rej{background:rgba(250,90,90,.15);color:#f87171;border:1px solid rgba(250,90,90,.4)}
-.nbell{position:relative;display:inline-flex;align-items:center;justify-content:center;color:var(--muted);padding:8px;border-radius:12px;margin-inline-start:auto}
-.nbell svg{width:22px;height:22px}
-.nbell .unread{position:absolute;top:2px;inset-inline-end:2px;margin:0;min-width:18px;height:18px;font-size:.65rem}
+.nbell{position:relative;display:inline-flex;align-items:center;justify-content:center;color:var(--muted);padding:8px;border-radius:var(--r-md);margin-inline-start:auto}
+.nbell svg{width:var(--ic-md);height:var(--ic-md)}
+.nbell .unread{position:absolute;top:2px;inset-inline-end:2px;margin:0;min-width:var(--ic-sm);height:var(--ic-sm);font-size:.65rem}
 .notif-card{display:flex;gap:12px;align-items:flex-start;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px 14px;margin-bottom:10px;color:inherit;text-decoration:none}
 .notif-card.fresh{border-color:var(--accent)}
 .notif-ic{color:var(--accent);flex-shrink:0;margin-top:2px}
-.notif-ic svg{width:22px;height:22px}
+.notif-ic svg{width:var(--ic-md);height:var(--ic-md)}
 .notif-tx{display:flex;flex-direction:column;gap:4px}
 .notif-tx b{font-size:.95rem}
 .notif-tx span{font-size:.88rem;color:var(--text)}
 .wpn-img{width:100%;max-height:150px;object-fit:cover;border-radius:10px;margin-bottom:8px}
-@media(max-width:760px){.bottomnav a svg{width:22px;height:22px}.bottomnav a{padding:8px 2px}}
+@media(max-width:760px){.bottomnav a svg{width:var(--ic-md);height:var(--ic-md)}.bottomnav a{padding:8px 2px}}
 
 /* ===== درج التنقل (هامبرغر) بأقسام — للشاشات الصغيرة فقط ===== */
 .menu-btn{background:none;border:0;color:var(--fg);cursor:pointer;padding:8px;border-radius:10px;display:none}
