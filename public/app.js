@@ -1679,14 +1679,14 @@ function mapFinishDraw() {
 
 // ---------- مقال ----------
 async function vArticle(id) {
-  app.innerHTML = `<div class="backrow"><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
+  app.innerHTML = `<div class="backrow"><button class="menu-btn" onclick="document.body.classList.toggle('nav-open')" aria-label="القائمة">${MENU_SVG}</button><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
     <div class="thead-title" style="padding:0">مقال</div></div><div class="spin"></div>`;
   try {
     const a = await api('GET', `/articles/${id}`);
     const c = countryOf(a.author.country_code);
     const canDel = me && (me.id === a.author.id || me.role === 'admin');
     const gold = a.category === 'official';
-    app.innerHTML = `<div class="backrow"><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
+    app.innerHTML = `<div class="backrow"><button class="menu-btn" onclick="document.body.classList.toggle('nav-open')" aria-label="القائمة">${MENU_SVG}</button><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
       <div class="thead-title" style="padding:0">مقال</div></div>
       <div class="detail" data-kind="a" data-id="${a.id}"><div class="d-pad">
         <span class="tw-cat${gold ? ' gold' : ''}">${esc(a.category_label)}</span>
@@ -1730,7 +1730,7 @@ async function vDossiers() {
   } catch (e) { document.querySelector('.dos-list').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 async function vDossier(username) {
-  app.innerHTML = `<div class="backrow"><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
+  app.innerHTML = `<div class="backrow"><button class="menu-btn" onclick="document.body.classList.toggle('nav-open')" aria-label="القائمة">${MENU_SVG}</button><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
     <div class="thead-title" style="padding:0">الملف الاستخباراتي</div></div><div class="spin"></div>`;
   let r;
   try { r = await api('GET', '/dossier/' + encodeURIComponent(username)); }
@@ -1746,7 +1746,7 @@ async function vDossier(username) {
     return `<div class="dos-skill"><span>${label}</span><span class="dos-dots" dir="ltr">${dots(v)}</span></div>`;
   }).join('');
   app.innerHTML = `
-  <div class="backrow"><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
+  <div class="backrow"><button class="menu-btn" onclick="document.body.classList.toggle('nav-open')" aria-label="القائمة">${MENU_SVG}</button><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
     <div class="thead-title" style="padding:0">الملف الاستخباراتي</div></div>
   <div class="dossier">
     <div class="dos-top"><span>ARGOS // STRATEGIC DOSSIER</span><span>CLASSIFIED // EYES ONLY</span></div>
@@ -1842,7 +1842,7 @@ async function vDash() {
   const mine_a = arts.filter((a) => a.author.username === me.username).length;
   const mine_d = disps.filter((d) => d.author.username === me.username).length;
   app.innerHTML = `
-    <div class="backrow"><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
+    <div class="backrow"><button class="menu-btn" onclick="document.body.classList.toggle('nav-open')" aria-label="القائمة">${MENU_SVG}</button><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
       <div class="thead-title" style="padding:0;display:flex;align-items:center;gap:6px">${esc(me.username)} ${me.role === 'admin' ? ICONS.checkGold : ICONS.check}</div></div>
     <div class="ig">
       <div class="ig-top">
@@ -2300,11 +2300,11 @@ function openStory(username) {
 
 // ---------- برقية: تفاصيل + تعليقات ----------
 async function vDispatch(id) {
-  app.innerHTML = `<div class="backrow"><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
+  app.innerHTML = `<div class="backrow"><button class="menu-btn" onclick="document.body.classList.toggle('nav-open')" aria-label="القائمة">${MENU_SVG}</button><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
     <div class="thead-title" style="padding:0">برقية</div></div><div class="spin"></div>`;
   try {
     const d = await api('GET', `/dispatches/${id}`);
-    app.innerHTML = `<div class="backrow"><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
+    app.innerHTML = `<div class="backrow"><button class="menu-btn" onclick="document.body.classList.toggle('nav-open')" aria-label="القائمة">${MENU_SVG}</button><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
       <div class="thead-title" style="padding:0">برقية</div></div>
       ${tweetHTML(d)}
       ${commentsHTML()}`;
@@ -2316,7 +2316,7 @@ async function vDispatch(id) {
 
 // ---------- بروفايل عام ----------
 async function vUser(username) {
-  app.innerHTML = `<div class="backrow"><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
+  app.innerHTML = `<div class="backrow"><button class="menu-btn" onclick="document.body.classList.toggle('nav-open')" aria-label="القائمة">${MENU_SVG}</button><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
     <div class="thead-title" style="padding:0">البروفايل</div></div><div class="spin"></div>`;
   try {
     const { user, stats } = await api('GET', '/user/' + encodeURIComponent(username));
@@ -2336,7 +2336,7 @@ async function vUser(username) {
       ...as.filter((a) => a.image).map((a) => ({ kind: 'a', id: a.id, image: a.image, ts: a.created_at })),
     ].sort((x, y) => y.ts - x.ts);
     app.innerHTML = `
-      <div class="backrow"><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
+      <div class="backrow"><button class="menu-btn" onclick="document.body.classList.toggle('nav-open')" aria-label="القائمة">${MENU_SVG}</button><button class="backbtn" onclick="history.back()">${ICONS.back}</button>
         <div class="thead-title" style="padding:0;display:flex;align-items:center;gap:6px">${esc(user.username)} ${badge}</div></div>
       <div class="ig">
         <div class="ig-top">
