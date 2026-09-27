@@ -587,7 +587,10 @@ app.get('/api/clock', ah(async (req, res) => {
 }));
 app.post('/api/clock/start', ah(auth), requireDeveloper, ah(async (req, res) => {
   const now = Date.now();
-  await q('UPDATE game_clock SET started_at=$1, running=1, updated_by=$2 WHERE id=1', [now, req.user.id]);
+  const prev = await one('SELECT started_at FROM game_clock WHERE id=1');
+  // يحافظ على نقطة البداية المضبوطة (مثل 6 مساء GMT) — لا يمسحها إلا لو لم توجد
+  const started = (prev && prev.started_at) ? prev.started_at : now;
+  await q('UPDATE game_clock SET started_at=$1, running=1, updated_by=$2 WHERE id=1', [started, req.user.id]);
   await q('UPDATE companies SET last_collect=NULL');
   await q('UPDATE country_economy SET last_tax_collect=NULL');
   res.json({ ok: true, running: true, started_at: now, game: gameDateOf(now, now) });

@@ -469,7 +469,7 @@ async function mountClock(el) {
   }, 60000));
 }
 async function clockStart() {
-  try { clockState = await api('POST', '/clock/start'); alert('بدأت الساعة ✓ — انطلق زمن اللعبة من يناير 1900'); }
+  try { clockState = await api('POST', '/clock/start'); alert('بدأت الساعة ✓'); }
   catch (e) { alert(e.message); }
 }
 async function clockStop() {
