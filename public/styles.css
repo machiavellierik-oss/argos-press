@@ -574,6 +574,12 @@ button{font-family:inherit;cursor:pointer}
 .wpn-tx b{font-size:.95rem}
 .wpn-tx span{color:var(--muted)}
 .wpn-qty{color:var(--gold)!important;font-weight:700}
+.wpn-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.conf-badge{font-size:.7rem;padding:2px 8px;border-radius:20px;font-weight:700}
+.conf-documented{background:rgba(48,209,88,.15);color:#30d158}
+.conf-estimate{background:rgba(255,159,10,.15);color:#ff9f0a}
+.conf-unknown{background:rgba(142,142,147,.15);color:#98989f}
+.wpn-src{color:var(--gold)!important;font-size:.75rem}
 .wpn-list{display:flex;flex-direction:column;gap:8px}
 .wpn-row{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--hover);border-radius:10px}
 .wpn-row-tx{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}

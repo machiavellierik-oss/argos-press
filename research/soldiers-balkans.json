@@ -1,0 +1,37 @@
+[
+  {
+    "country_code": "GR",
+    "soldiers": 25000,
+    "source": "https://www.globalsecurity.org/military/world/europe/gr-army-history-1897.htm",
+    "confidence": "documented",
+    "note": "جيش زمن السلم بحد أقصى 25,000 سنة 1897 حسب GlobalSecurity (بريتانيكا 1911 تذكر 21,355 سنة 1908)"
+  },
+  {
+    "country_code": "RS",
+    "soldiers": 18000,
+    "source": "https://www.britannica.com/place/Serbia",
+    "confidence": "estimate",
+    "note": "رقم زمن السلم من موسوعة بريتانيكا حوالي 1884–1885؛ لا يوجد جرد مباشر لسنة 1900"
+  },
+  {
+    "country_code": "RO",
+    "soldiers": 60388,
+    "source": "https://En.Wikisource.org/wiki/The_New_International_Encyclop%C3%A6dia/Armies",
+    "confidence": "documented",
+    "note": "جيش زمن السلم: 60,388 في القسم الدائم + 72,000 في القسم الإقليمي؛ زمن الحرب ~170,000 (موسوعة New International Encyclopædia 1902–1905 تصف الوضع حوالي 1900)"
+  },
+  {
+    "country_code": "BG",
+    "soldiers": 42000,
+    "source": "https://www.globalsecurity.org/military/world/europe/bg-land-forces-history-1.htm",
+    "confidence": "documented",
+    "note": "جيش زمن السلم نهاية القرن 19: 2,600 ضابط + 42,000 جندي (تقدير GlobalSecurity لزمن الحرب ~1907: 53,000)"
+  },
+  {
+    "country_code": "ME",
+    "soldiers": 25000,
+    "source": "http://aos.ro/wp-content/anale/IVol5Nr1Art.6.pdf",
+    "confidence": "documented",
+    "note": "الرقم موثق لعصر حروب البلقان 1912؛ حوالي 1900 لم يكن جيش نظامي دائم — القوة الحقيقية ميليشيا قبلية + حرس"
+  }
+]

@@ -1,0 +1,51 @@
+[
+ {
+  "confidence": "estimate",
+  "country_code": "ET",
+  "note": "جيش عدوة 1896: 100–120 ألف مقاتل (80–100 ألف منهم مسلحون بنادق حديثة حسب بانكهرست)؛ تعبئة إقطاعية لا جيش نظامي دائم، والحرس الإمبراطوري وحده 35 ألفًا في عدوة",
+  "soldiers": 100000,
+  "source": "https://vectree.io/pdf/c/adwa-military-logistics"
+ },
+ {
+  "confidence": "verified",
+  "country_code": "MA",
+  "note": "العسكر النظامي (عسكر النظام) في عهد الحسن الأول، حسب سوزان غيلسون ميلر (تاريخ المغرب الحديث، 2013، ص 41) نقلًا عن ويكيبيديا؛ الإمكانات القبلية (كيش/محلات) أكبر بكثير لكنها غير موثقة رقميًا",
+  "soldiers": 25000,
+  "source": "https://en.wikipedia.org/wiki/Hassan_I_of_Morocco"
+ },
+ {
+  "confidence": "unknown",
+  "country_code": "LR",
+  "note": "سنة 1900: الدفاع كان ميليشيا المستوطنين (فوجان سنة 1846) وجميع الذكور 16–50 مكلفون نظريًا؛ القوة الحدودية النظامية (500 رجل) تأسست في 1908 فقط؛ لا يوجد تعداد موثق للميليشيا حول 1900",
+  "soldiers": null,
+  "source": "https://en.wikipedia.org/wiki/Armed_Forces_of_Liberia"
+ },
+ {
+  "confidence": "verified",
+  "country_code": "TV",
+  "note": "إجمالي قوة الكوماندوز التعبوية؛ في 12 أكتوبر 1899 عُبّئ فعليًا نحو 21,000 ترانسفالي حسب Warfare History Network، وكان يمكن تعبئة ~25,000 خلال أسبوعين",
+  "soldiers": 25000,
+  "source": "https://en.wikipedia.org/wiki/Second_Anglo-Boer_War"
+ },
+ {
+  "confidence": "verified",
+  "country_code": "OF",
+  "note": "في 12 أكتوبر 1899 عُبّئ فعليًا 15,000 من أورانج الحرة حسب Warfare History Network؛ القوات النظامية الوحيدة كانت المدفعية (375 رجلًا) والباقي كوماندوز من المواطنين",
+  "soldiers": 15000,
+  "source": "https://warfarehistorynetwork.com/article/a-most-lamentable-failure/"
+ },
+ {
+  "confidence": "estimate",
+  "country_code": "OM",
+  "note": "المصدر يذكر أن قوات السلطان في بداية القرن 20 تراوحت بين 50 و60 رجلًا مسلحًا يدافعون عن السلطان؛ أُخذت القيمة العليا. الحامية النظامية (Muscat Garrison) لم تتشكل إلا سنة 1907، وأي قوة قبلية إضافية تُحشد عند الحاجة غير موثقة بعدد.",
+  "soldiers": 60,
+  "source": "https://www.globalsecurity.org/military/world/gulf/oman-army.htm"
+ },
+ {
+  "confidence": "estimate",
+  "country_code": "HS",
+  "note": "قوة إمارة حائل في الحرب السعودية-الرشيدية الأولى (1903–1907): 20,000–25,000 مقاتل بدعم 8 كتائب مشاة عثمانية؛ أُخذت القيمة الدنيا. لا يوجد تعداد موثق لسنة 1900 نفسها؛ وثيقة عثمانية 1891 قدّرت 10,000 مقاتل، وتقديرات أخرى (1860s) تراوحت بين 6,000 و40,000. الجيش: فرسان وحملة بنادق من الحضر والبادية، كل مقاتل يجهز نفسه.",
+  "soldiers": 20000,
+  "source": "https://en.wikipedia.org/wiki/First_Saudi%E2%80%93Rashidi_War_(1903%E2%80%931907)"
+ }
+]

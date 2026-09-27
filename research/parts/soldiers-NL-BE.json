@@ -1,0 +1,26 @@
+{
+  "countries": [
+    "NL",
+    "BE"
+  ],
+  "data": [
+    {
+      "country": "NL",
+      "country_name_ar": "هولندا",
+      "year": 1900,
+      "soldiers": 28000,
+      "confidence": "confirmed",
+      "source": "https://www.Globalsecurity.org/military/world/europe/nl-landmacht-history.htm",
+      "notes_ar": "26,000 جندي + 2,000 ضابط على قدم السلم سنة 1900 (بدون مدفعية الحصون)."
+    },
+    {
+      "country": "BE",
+      "country_name_ar": "بلجيكا",
+      "year": 1900,
+      "soldiers": 43000,
+      "confidence": "estimate",
+      "source": "https://shs.cairn.info/article/CRIS_1012_0001/pdf?lang=fr",
+      "notes_ar": "متوسط قوة الجيش بين 1900 و1912 نحو 43,000؛ قانون 1902 حدد 42,800 لاحقًا."
+    }
+  ]
+}

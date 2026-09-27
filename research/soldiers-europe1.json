@@ -1,0 +1,44 @@
+[
+  {
+    "country_code": "GB",
+    "soldiers": 302000,
+    "source": "https://en.wikipedia.org/wiki/British_Army",
+    "confidence": "documented"
+  },
+  {
+    "country_code": "FR",
+    "soldiers": 600000,
+    "source": "https://fr.wikisource.org/wiki/La_Chronique_de_France,_1901/Chapitre_II",
+    "confidence": "estimate"
+  },
+  {
+    "country_code": "DE",
+    "soldiers": 600516,
+    "source": "https://germanhistorydocs.org/index.php/en/wilhelmine-germany-and-the-first-world-war-1890-1914/strength-of-the-german-army-1890-1914.pdf",
+    "confidence": "documented"
+  },
+  {
+    "country_code": "RU",
+    "soldiers": 896000,
+    "source": "https://www.globalsecurity.org/military/world/russia/army-czar-1900.htm",
+    "confidence": "estimate"
+  },
+  {
+    "country_code": "AT",
+    "soldiers": 309200,
+    "source": "https://brilliantmaps.com/uk-military-1900-vs-2026/",
+    "confidence": "estimate"
+  },
+  {
+    "country_code": "IT",
+    "soldiers": 278000,
+    "source": "https://brilliantmaps.com/uk-military-1900-vs-2026/",
+    "confidence": "estimate"
+  },
+  {
+    "country_code": "OT",
+    "soldiers": 260000,
+    "source": "https://en.wikipedia.org/wiki/Ottoman_Army_(1861%E2%80%9322)",
+    "confidence": "estimate"
+  }
+]

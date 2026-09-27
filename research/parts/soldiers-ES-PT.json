@@ -1,0 +1,16 @@
+[
+ {
+  "confidence": "estimate",
+  "country_code": "ES",
+  "note": "تعداد نهاية 1901 (الأقرب زمنيًا لسنة 1900): 135,560 — منهم 15,919 ضابطًا عاملًا و6,916 ضابط احتياط مدفوع و112,725 جنديًا؛ ملاك السلم.",
+  "soldiers": 135560,
+  "source": "https://revistas.ucm.es/index.php/CHCO/article/download/CHCO8888220155A/7174/8101"
+ },
+ {
+  "confidence": "estimate",
+  "country_code": "PT",
+  "note": "نحو 40,000 على ملاك السلم (العدد الفعلي من الجنود أقل)؛ قدرة التعبئة نحو 185,000.",
+  "soldiers": 40000,
+  "source": "https://books.openedition.org/cidehus/3537"
+ }
+]

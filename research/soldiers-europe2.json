@@ -1,0 +1,50 @@
+[
+  {
+    "country_code": "ES",
+    "soldiers": 135560,
+    "source": "https://revistas.ucm.es/index.php/CHCO/article/download/CHCO8888220155A/7174/8101",
+    "confidence": "estimate"
+  },
+  {
+    "country_code": "PT",
+    "soldiers": 40000,
+    "source": "https://books.openedition.org/cidehus/3537",
+    "confidence": "estimate"
+  },
+  {
+    "country_code": "NL",
+    "soldiers": 28000,
+    "source": "https://www.Globalsecurity.org/military/world/europe/nl-landmacht-history.htm",
+    "confidence": "confirmed"
+  },
+  {
+    "country_code": "BE",
+    "soldiers": 43000,
+    "source": "https://shs.cairn.info/article/CRIS_1012_0001/pdf?lang=fr",
+    "confidence": "estimate"
+  },
+  {
+    "country_code": "CH",
+    "soldiers": null,
+    "source": "https://de.wikipedia.org/wiki/Schweizer_Armee",
+    "confidence": "unknown"
+  },
+  {
+    "country_code": "SE",
+    "soldiers": null,
+    "source": "https://www.globalSecurity.org/military/world/europe/se-armen-history-1901.htm",
+    "confidence": "unknown"
+  },
+  {
+    "country_code": "LU",
+    "soldiers": null,
+    "source": "https://hal.science/hal-04090652v1/file/Arboit_Gend%20lux%201819-1919.pdf",
+    "confidence": "unknown"
+  },
+  {
+    "country_code": "DK",
+    "soldiers": 14000,
+    "source": "https://www.globalsecurity.org/military/world/europe/dk-army-history.htm",
+    "confidence": "estimate"
+  }
+]

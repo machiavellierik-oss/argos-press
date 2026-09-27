@@ -884,6 +884,8 @@ function renderDeclarations(mstates) {
 
 // ---------- جيوش الدول وتسليح 1900 ----------
 const fmtArmy = (n) => Number(n || 0).toLocaleString('en-US');
+const CONF_LBL = { documented: 'موثق', estimate: 'تقدير', unknown: 'غير موثق' };
+const confBadge = (c) => `<span class="conf-badge conf-${c || 'unknown'}">${CONF_LBL[c] || 'غير موثق'}</span>`;
 async function renderArmiesSection() {
   const el = document.getElementById('warmies'); if (!el) return;
   const t = document.getElementById('army-sec-t'), h = document.getElementById('army-sec-hint');
@@ -941,7 +943,8 @@ async function vArmy(code) {
           <div class="wpn-tx"><b>${esc(w.name)}</b>
             <span>النوع: ${esc(w.wtype || '—')}</span>
             <span>الطراز: ${esc(w.model || '—')}</span>
-            <span class="wpn-qty">العدد: ${w.quantity == null ? "—" : fmtArmy(w.quantity)}</span></div>
+            <span class="wpn-qty">العدد: ${w.quantity == null ? "—" : fmtArmy(w.quantity)}</span>
+            <span class="wpn-meta">${confBadge(w.confidence)}${w.source_url ? ` <a href="${esc(w.source_url)}" target="_blank" rel="noopener" class="wpn-src">المصدر</a>` : ''}</span></div>
         </div>`).join('')}
       </div></div>`).join('') : '<div class="empty">لا توجد أسلحة مسجلة لهذه الدولة بعد.</div>'}
     <a class="btn ghost" href="#/news" style="margin-top:12px">← عودة لغرفة الحرب</a>`;
@@ -971,6 +974,10 @@ async function renderArmyManager() {
       <div class="field"><label>الطراز</label><input id="wpn-model" placeholder="Mk I" dir="ltr"></div>
       <div class="field"><label>العدد</label><input id="wpn-qty" type="number" min="0" dir="ltr"></div>
       <div class="field"><label>صورة السلاح</label><input id="wpn-img" type="file" accept="image/*"><div id="wpn-preview" style="margin-top:6px"></div></div>
+      <div class="field"><label>رابط المصدر</label><input id="wpn-src" placeholder="https://..." dir="ltr"></div>
+      <div class="field"><label>الثقة</label><select id="wpn-conf">
+        <option value="documented">موثق</option><option value="estimate">تقدير</option><option value="unknown" selected>غير موثق</option></select></div>
+      <div class="field"><label>ملاحظة</label><input id="wpn-note" placeholder="مثال: رقم الإنتاج الكلي"></div>
       <div class="me-btns">
         <button class="btn" onclick="wpnSave()">${ICONS.checkSm} حفظ السلاح</button>
         <button class="btn ghost" onclick="wpnClear()">جديد</button>
@@ -991,7 +998,7 @@ async function armyLoad() {
     const ws = d.weapons || [];
     box.innerHTML = ws.length ? '<div class="wpn-list">' + ws.map((w) => `
       <div class="wpn-row"><div class="wpn-row-tx"><b>${esc(w.name)}</b>
-        <span class="hint">${esc(w.class || '')} · ${esc(w.wtype || '')} · ${esc(w.model || '')} · العدد: ${w.quantity == null ? "—" : fmtArmy(w.quantity)}</span></div>
+        <span class="hint">${esc(w.class || '')} · ${esc(w.wtype || '')} · ${esc(w.model || '')} · العدد: ${w.quantity == null ? "—" : fmtArmy(w.quantity)} · ${CONF_LBL[w.confidence] || 'غير موثق'}</span></div>
         <button class="btn ghost sm" onclick='wpnEdit(${JSON.stringify(w.id)})'>تعديل</button>
         <button class="btn danger sm" onclick='wpnDel(${JSON.stringify(w.id)})'>حذف</button></div>`).join('') + '</div>'
       : '<div class="empty">لا توجد أسلحة — أضف أول سلاح من النموذج بالأسفل.</div>';
@@ -1006,7 +1013,8 @@ async function armySave() {
   } catch (e) { alert(e.message); }
 }
 function wpnClear() {
-  ['wpn-id', 'wpn-name', 'wpn-class', 'wpn-type', 'wpn-model', 'wpn-qty'].forEach((id) => { document.getElementById(id).value = ''; });
+  ['wpn-id', 'wpn-name', 'wpn-class', 'wpn-type', 'wpn-model', 'wpn-qty', 'wpn-src', 'wpn-note'].forEach((id) => { document.getElementById(id).value = ''; });
+  document.getElementById('wpn-conf').value = 'unknown';
   document.getElementById('wpn-img').value = '';
   document.getElementById('wpn-preview').innerHTML = '';
 }
@@ -1018,6 +1026,9 @@ function wpnEdit(id) {
   document.getElementById('wpn-type').value = w.wtype || '';
   document.getElementById('wpn-model').value = w.model || '';
   document.getElementById('wpn-qty').value = w.quantity == null ? '' : w.quantity;
+  document.getElementById('wpn-src').value = w.source_url || '';
+  document.getElementById('wpn-conf').value = w.confidence || 'unknown';
+  document.getElementById('wpn-note').value = w.note || '';
   document.getElementById('wpn-preview').innerHTML = w.image_url ? `<img src="${esc(w.image_url)}" style="max-width:120px;border-radius:8px">` : '';
   window.scrollTo(0, document.getElementById('wpn-name').offsetTop - 80);
 }
@@ -1038,6 +1049,7 @@ async function wpnSave() {
     country_code: code,
     name: val('wpn-name'), class: val('wpn-class'), wtype: val('wpn-type'),
     model: val('wpn-model'), quantity: val('wpn-qty'), image_url,
+    source_url: val('wpn-src'), confidence: val('wpn-conf'), note: val('wpn-note'),
   };
   try {
     if (id) await api('PUT', '/weapons/' + id, body);

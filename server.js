@@ -665,60 +665,54 @@ async function seedArmies() {
   await q(`CREATE TABLE IF NOT EXISTS weapons (
     id SERIAL PRIMARY KEY, country_code TEXT, name TEXT, class TEXT,
     wtype TEXT, model TEXT, quantity INTEGER, image_url TEXT,
-    created_by INTEGER, created_at BIGINT
+    created_by INTEGER, created_at BIGINT,
+    source_url TEXT, confidence TEXT DEFAULT 'unknown', note TEXT
   )`);
-  // تعداد الجيوش النظامية سنة 1900 (تقديرات تاريخية تقريبية — قابلة للتعديل من المطورين)
-  const SOLDIERS = {
-    RU: 1062000, DE: 628400, FR: 623400, GB: 431800, CN: 364151, AT: 309200,
-    IT: 278000, OT: 277000, JP: 180000, ET: 162500, US: 137000, ES: 124400,
-    SN: 69800, RO: 62200, BE: 48720, BG: 42000, PT: 40000, RS: 35000,
-    NL: 35000, GR: 30000, MA: 30000, MX: 30000, AF: 25000, TV: 25000,
-    BR: 25000, CH: 25000, IR: 20000, NP: 20000, AR: 20000, DK: 18000,
-    CL: 15000, OF: 12000, TH: 12000, KR: 10000, ME: 8000, CO: 8000,
-    VE: 8000, PE: 8000, HT: 6000, BO: 5000, EC: 5000, UY: 5000,
-    HS: 5000, PY: 4000, DO: 4000, GT: 4000, HN: 3000, SV: 3000,
-    NI: 3000, OM: 3000, CR: 2000, LR: 2000, LU: 500,
-  };
-  for (const [cc, n] of Object.entries(SOLDIERS)) {
-    const ex = await one('SELECT country_code FROM armies WHERE country_code=$1', [cc]);
-    if (!ex) await q(
-      'INSERT INTO armies (country_code,soldiers,note,updated_at) VALUES ($1,$2,$3,$4)',
-      [cc, n, 'تقدير تاريخي لتعداد 1900 — قابل للتعديل', Date.now()]);
+  // أعمدة جديدة لقواعد البيانات التي أُنشئت قبل إضافتها
+  for (const colDef of ['source_url TEXT', "confidence TEXT DEFAULT 'unknown'", 'note TEXT']) {
+    try { await q(`ALTER TABLE weapons ADD COLUMN ${colDef}`); } catch (e) { /* العمود موجود */ }
   }
-  // الترسانة الافتتاحية للقوى الكبرى: [الدولة, الاسم الكامل, الصنف, النوع, الطراز, العدد]
-  const W = [
-    ['GB', 'بندقية لي-إنفيلد', 'بنادق', 'بندقية مشاة تكرارية', 'Mk I', 500000],
-    ['GB', 'رشاش مكسيم', 'رشاشات', 'رشاش ثقيل', 'Maxim Gun', 400],
-    ['GB', 'مدفع BL عيار 15 رطل', 'مدفعية', 'مدفع ميداني', 'BL 15-pounder', 300],
-    ['FR', 'بندقية لوبيل', 'بنادق', 'بندقية مشاة', 'M1886/93', 2000000],
-    ['FR', 'مدفع 75 ملم سريع الرمي', 'مدفعية', 'مدفع ميداني', 'mle 1897', 1000],
-    ['FR', 'رشاش هوتشكيس', 'رشاشات', 'رشاش ثقيل', 'M1900', 150],
-    ['DE', 'بندقية غيفير 98', 'بنادق', 'بندقية مشاة', 'Gewehr 98', 1000000],
-    ['DE', 'رشاش مكسيم الألماني', 'رشاشات', 'رشاش ثقيل', 'MG 99', 150],
-    ['DE', 'مدفع كروب 77 ملم', 'مدفعية', 'مدفع ميداني', 'FK 96', 800],
-    ['RU', 'بندقية موسين-ناغان', 'بنادق', 'بندقية مشاة', 'M1891', 3000000],
-    ['RU', 'رشاش مكسيم الروسي', 'رشاشات', 'رشاش ثقيل', 'M1895', 250],
-    ['RU', 'مدفع بوتيلوف 76.2 ملم', 'مدفعية', 'مدفع ميداني', 'M1900', 500],
-    ['US', 'بندقية كراغ-يورغنسن', 'بنادق', 'بندقية مشاة', 'M1898', 400000],
-    ['US', 'رشاش كولت (حفّار البطاطس)', 'رشاشات', 'رشاش ثقيل', 'M1895', 250],
-    ['US', 'مدفع 3.2 بوصة', 'مدفعية', 'مدفع ميداني', 'M1897', 150],
-    ['JP', 'بندقية أريساكا', 'بنادق', 'بندقية مشاة', 'Type 30', 500000],
-    ['JP', 'مدفع طراز 31 عيار 75 ملم', 'مدفعية', 'مدفع ميداني', 'Type 31', 300],
-    ['OT', 'بندقية ماوزر العثمانية', 'بنادق', 'بندقية مشاة', 'M1893', 500000],
-    ['OT', 'مدفع كروب 87 ملم', 'مدفعية', 'مدفع ميداني', 'Krupp 87mm', 300],
-    ['AT', 'بندقية مانليخر', 'بنادق', 'بندقية مشاة', 'M1895', 800000],
-    ['AT', 'مدفع ميداني 8 سم', 'مدفعية', 'مدفع ميداني', 'M1899', 250],
-    ['IT', 'بندقية كاركانو', 'بنادق', 'بندقية مشاة', 'M1891', 1000000],
-    ['IT', 'مدفع 75 ملم', 'مدفعية', 'مدفع ميداني', 'M1897', 200],
-    ['ES', 'بندقية ماوزر الإسبانية', 'بنادق', 'بندقية مشاة', 'M1893', 400000],
-    ['ES', 'مدفع كروب 90 ملم', 'مدفعية', 'مدفع ميداني', 'Krupp 90mm', 150],
-  ];
-  const wc = await one('SELECT COUNT(*) AS c FROM weapons');
-  if (Number(wc.c) === 0) {
-    for (const [cc, name, cls, type, model, qty] of W) {
-      await q(`INSERT INTO weapons (country_code,name,class,wtype,model,quantity,created_at)
-               VALUES ($1,$2,$3,$4,$5,$6,$7)`, [cc, name, cls, type, model, qty, Date.now()]);
+  await q(`CREATE TABLE IF NOT EXISTS seed_meta (key TEXT PRIMARY KEY, value TEXT)`);
+
+  // تعداد الجيوش من البحث التاريخي — يُحدَّث فقط ما لم يعدّله المطور يدويًا
+  let SOLDIERS = [];
+  try { SOLDIERS = require('./server/data/soldiers-1900.json'); } catch (e) { /* بلا بيانات */ }
+  const noteFor = (s) => s.confidence === 'documented' ? 'تعداد موثق تاريخيًا — قابل للتعديل'
+    : s.confidence === 'estimate' ? 'تقدير تاريخي — قابل للتعديل' : 'غير موثق بدقة — قابل للتعديل';
+  for (const s of SOLDIERS) {
+    if (!s || s.soldiers == null) continue;
+    const ex = await one('SELECT country_code, updated_by FROM armies WHERE country_code=$1', [s.country_code]);
+    if (!ex) {
+      await q('INSERT INTO armies (country_code,soldiers,note,updated_at) VALUES ($1,$2,$3,$4)',
+        [s.country_code, s.soldiers, noteFor(s), Date.now()]);
+    } else if (!ex.updated_by) {
+      await q('UPDATE armies SET soldiers=$1, note=$2, updated_at=$3 WHERE country_code=$4',
+        [s.soldiers, noteFor(s), Date.now(), s.country_code]);
     }
+  }
+
+  // احتياطي للدول التي لا يوجد لها تعداد موثق في البحث
+  const FALLBACK = { CH: 25000, SN: 69800, LU: 500, TH: 12000, LR: 2000, BO: 5000, CL: 15000, PY: 4000 };
+  for (const [cc, n] of Object.entries(FALLBACK)) {
+    const ex = await one('SELECT country_code FROM armies WHERE country_code=$1', [cc]);
+    if (!ex) await q('INSERT INTO armies (country_code,soldiers,note,updated_at) VALUES ($1,$2,$3,$4)',
+      [cc, n, 'تقدير تاريخي — قابل للتعديل', Date.now()]);
+  }
+  // وما يضيفه المطور يدويًا (created_by) لا يُمس
+  const meta = await one("SELECT value FROM seed_meta WHERE key='weapons_v2'");
+  if (!meta) {
+    await q('DELETE FROM weapons WHERE created_by IS NULL');
+    let WEAPONS = [];
+    try { WEAPONS = require('./server/data/weapons-1900.json'); } catch (e) { /* بلا بيانات */ }
+    for (const w of WEAPONS) {
+      await q(`INSERT INTO weapons (country_code,name,class,wtype,model,quantity,image_url,
+               source_url,confidence,note,created_at)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [w.country_code, w.name_ar, w.class, w.wtype || null, w.model || null,
+         w.quantity, w.image_url, w.source || null, w.confidence || 'unknown',
+         w.note || null, Date.now()]);
+    }
+    await q("INSERT INTO seed_meta (key,value) VALUES ('weapons_v2','done')");
   }
 }
 
@@ -744,7 +738,7 @@ app.get('/api/armies/:code', ah(auth), ah(async (req, res) => {
   if (!dev && cc !== req.user.country_code)
     return res.status(403).json({ error: 'كل لاعب يرى جيش دولته فقط' });
   const a = await one('SELECT country_code,soldiers,note,updated_at FROM armies WHERE country_code=$1', [cc]);
-  const ws = await all(`SELECT id,country_code,name,class,wtype,model,quantity,image_url,created_at
+  const ws = await all(`SELECT id,country_code,name,class,wtype,model,quantity,image_url,source_url,confidence,note,created_at
                         FROM weapons WHERE country_code=$1 ORDER BY id`, [cc]);
   res.json({
     army: a ? { country_code: a.country_code, soldiers: Number(a.soldiers) || 0, note: a.note } : null,
@@ -775,21 +769,26 @@ function cleanWeapon(b) {
   }
   out.quantity = b.quantity == null || b.quantity === '' ? null : Math.max(0, parseInt(b.quantity, 10) || 0);
   out.image_url = typeof b.image_url === 'string' && b.image_url.trim() ? b.image_url.trim().slice(0, 500) : null;
+  out.source_url = typeof b.source_url === 'string' && b.source_url.trim() ? b.source_url.trim().slice(0, 500) : null;
+  out.confidence = ['documented', 'estimate', 'unknown'].includes(b.confidence) ? b.confidence : 'unknown';
+  out.note = typeof b.note === 'string' && b.note.trim() ? b.note.trim().slice(0, 500) : null;
   return out;
 }
 // إضافة سلاح — المطورون فقط
 app.post('/api/weapons', ah(auth), requireDeveloper, ah(async (req, res) => {
   let w; try { w = cleanWeapon(req.body || {}); } catch (e) { return res.status(400).json({ error: e.message }); }
-  const r = await q(`INSERT INTO weapons (country_code,name,class,wtype,model,quantity,image_url,created_by,created_at)
-                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-    [w.country_code, w.name, w.class, w.wtype, w.model, w.quantity, w.image_url, req.user.id, Date.now()]);
+  const r = await q(`INSERT INTO weapons (country_code,name,class,wtype,model,quantity,image_url,source_url,confidence,note,created_by,created_at)
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+    [w.country_code, w.name, w.class, w.wtype, w.model, w.quantity, w.image_url, w.source_url, w.confidence, w.note, req.user.id, Date.now()]);
   res.json({ ok: true, id: r.rows[0].id });
 }));
 // تعديل سلاح — المطورون فقط
 app.put('/api/weapons/:id', ah(auth), requireDeveloper, ah(async (req, res) => {
   let w; try { w = cleanWeapon(req.body || {}); } catch (e) { return res.status(400).json({ error: e.message }); }
-  await q(`UPDATE weapons SET country_code=$1,name=$2,class=$3,wtype=$4,model=$5,quantity=$6,image_url=$7
-           WHERE id=$8`, [w.country_code, w.name, w.class, w.wtype, w.model, w.quantity, w.image_url, req.params.id]);
+  await q(`UPDATE weapons SET country_code=$1,name=$2,class=$3,wtype=$4,model=$5,quantity=$6,image_url=$7,
+           source_url=$8,confidence=$9,note=$10 WHERE id=$11`,
+    [w.country_code, w.name, w.class, w.wtype, w.model, w.quantity, w.image_url,
+     w.source_url, w.confidence, w.note, req.params.id]);
   res.json({ ok: true });
 }));
 // حذف سلاح — المطورون فقط

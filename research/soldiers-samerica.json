@@ -1,0 +1,74 @@
+[
+  {
+    "country_code": "AR",
+    "soldiers": 10000,
+    "source": "https://www.memoria.fahce.unlp.edu.ar/art_revistas/pr.13347/pr.13347.pdf",
+    "confidence": "documented"
+  },
+  {
+    "country_code": "BO",
+    "soldiers": null,
+    "source": "https://www.globalsecurity.org/military/world/bolivia/army-history.htm",
+    "confidence": "unknown"
+  },
+  {
+    "country_code": "BR",
+    "soldiers": 28160,
+    "source": "https://en.wikipedia.org/wiki/Brazilian_Army_in_the_First_Republic",
+    "confidence": "documented"
+  },
+  {
+    "country_code": "CL",
+    "soldiers": null,
+    "source": "https://www.globalsecurity.org/military/world/chile/army-history.htm",
+    "confidence": "unknown"
+  },
+  {
+    "country_code": "CO",
+    "soldiers": 1000,
+    "source": "https://www.globalsecurity.org/military/world/colombia/army-history-1900.htm",
+    "confidence": "documented"
+  },
+  {
+    "country_code": "DO",
+    "soldiers": 14000,
+    "source": "https://www.GlobalSecurity.org/military/world/caribbean/dr-army-history-1.htm",
+    "confidence": "estimate"
+  },
+  {
+    "country_code": "EC",
+    "soldiers": 5000,
+    "source": "https://www.GlobalSecurity.org/military/world/ecuador/ejercito-history.htm",
+    "confidence": "estimate"
+  },
+  {
+    "country_code": "HT",
+    "soldiers": 9000,
+    "source": "https://en.wikipedia.org/wiki/Military_history_of_Haiti",
+    "confidence": "estimate"
+  },
+  {
+    "country_code": "PE",
+    "soldiers": 3075,
+    "source": "https://en.wikipedia.org/wiki/Peruvian_Army",
+    "confidence": "documented"
+  },
+  {
+    "country_code": "PY",
+    "soldiers": null,
+    "source": "https://es.wikipedia.org/wiki/Ejército_Paraguayo",
+    "confidence": "unknown"
+  },
+  {
+    "country_code": "UY",
+    "soldiers": 6000,
+    "source": "https://www.globalsecurity.org/military/world/uruguay/army-history.htm",
+    "confidence": "estimate"
+  },
+  {
+    "country_code": "VE",
+    "soldiers": 10000,
+    "source": "http://en.wikipedia.org/wiki/Dictatorship_of_Cipriano_Castro",
+    "confidence": "estimate"
+  }
+]
