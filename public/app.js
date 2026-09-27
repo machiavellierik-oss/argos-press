@@ -161,6 +161,7 @@ async function hydrateEngagement(type) {
 const NAV_SECTIONS = [
   { t: '', links: [['#/', 'الرئيسية', 'home']] },
   { t: 'الحرب', links: [['#/news', 'غرفة الحرب', 'globe'], ['#/wars', 'الحروب', 'swords'], ['#/diplomacy', 'الدبلوماسية', 'doc'], ['#/intel', 'الاستخبارات', 'search']] },
+  { t: 'المستشار', links: [['#/advisor', 'المستشار', 'shield'], ['#/cabinet', 'مجلس الوزراء', 'users']] },
   { t: 'الاقتصاد', links: [['#/economy', 'الاقتصاد والسكان', 'coin']] },
   { t: 'التجارة', links: [['#/market', 'السوق العام', 'swords']] },
   { t: 'الإعلام', links: [
@@ -2720,10 +2721,263 @@ async function vAudit() {
 }
 
 // ---------- التوجيه ----------
+
+// ---------- المستشار (ARGOS AI Advisor) ----------
+let ADV = { state: null, tasks: [], hist: [], modeSel: 1 };
+const ADV_DOMAINS = [['economy', 'الاقتصاد'], ['media', 'الإعلام'], ['companies', 'الشركات'], ['military', 'الجيش'], ['diplomacy', 'الدبلوماسية'], ['intel', 'الاستخبارات']];
+const ADV_RISK_L = { low: 'منخفضة', medium: 'متوسطة', high: 'مرتفعة' };
+const _advL = (t, arr) => (arr && arr.length) ? `<h4>${t}</h4><ul>${arr.map((x) => `<li>${esc(typeof x === 'string' ? x : JSON.stringify(x))}</li>`).join('')}</ul>` : '';
+
+function _advBriefCard(b) {
+  if (!b) return '<div class="empty">لا يوجد تقرير.</div>';
+  let body = '';
+  if (b.kind === 'economic') {
+    body = _advL('المشاكل الرئيسية', b.problems) + _advL('الفرص', b.opportunities) + _advL('المخاطر', b.risks)
+      + (b.options && b.options.length ? `<h4>الخيارات الاستراتيجية</h4><ul>${b.options.map((o) => `<li><b>${esc(o.label)}</b> — ${esc(o.desc)}</li>`).join('')}</ul>` : '');
+  } else if (b.kind === 'military') {
+    body = (b.status ? `<p><b>الوضع:</b> ${esc(b.status)}</p>` : '')
+      + _advL('نقاط القوة', b.strengths) + _advL('نقاط الضعف', b.weaknesses) + _advL('المخاطر', b.risks) + _advL('الاحتياجات', b.needs)
+      + (b.options && b.options.length ? `<h4>الخيارات الممكنة</h4><ul>${b.options.map((o) => `<li><b>${esc(o.label)}</b> — ${esc(o.desc)}</li>`).join('')}</ul>` : '')
+      + (b.warn ? `<div class="adv-warn">⚠️ ${esc(b.warn)}</div>` : '');
+  } else if (b.kind === 'intel') {
+    body = (b.about ? `<p><b>الموضوع:</b> ${esc(b.about)}</p>` : '')
+      + (b.confirmed && b.confirmed.length ? `<h4>معلومات مؤكدة</h4><ul>${b.confirmed.map((x) => `<li><b>${esc(x.level)}</b> — ${esc(x.text)}</li>`).join('')}</ul>` : '')
+      + (b.assessments && b.assessments.length ? `<h4>التقديرات الاستخبارية</h4><ul>${b.assessments.map((x) => `<li><b>${esc(x.target)}</b> [${esc(x.confidence)}]</li>`).join('')}</ul>` : '');
+  } else if (b.kind === 'diplomacy') {
+    body = `<p><b>السمعة الدبلوماسية:</b> ${esc(String(b.reputation))}/100</p>`
+      + (b.active_treaties && b.active_treaties.length ? `<h4>معاهدات نشطة</h4><ul>${b.active_treaties.map((t) => `<li>${esc(t.label || t.type)} — مع ${esc(countryOf(t.with).name)}${t.secret ? ' (سرية)' : ''}</li>`).join('')}</ul>` : '')
+      + _advL('توصياتي', b.suggestions);
+  } else if (b.kind === 'cabinet') {
+    body = b.ministers.map((x) => `<div class="adv-min"><div class="r">${esc(x.icon || '')} ${esc(x.role)}</div><div class="s">«${esc(x.say)}»</div></div>`).join('')
+      + `<div class="adv-chief"><div class="r">🧠 المستشار العام</div><div class="s">«${esc(b.chief || '')}»</div></div>`
+      + `<div class="adv-warn">«قرار القائد» — القرار الأخير لك وحدك.</div>`;
+  } else if (b.kind === 'daily') {
+    body = `<p>${esc(b.summary || '')}</p>` + Object.entries(b.sections || {})
+      .filter(([, v]) => v && v.length)
+      .map(([k, v]) => `<h4>${esc(k)}</h4><ul>${v.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`).join('');
+  }
+  return `<div class="adv-dossier"><div class="adv-dos-h">${esc(b.title || 'تقرير')}${b.date ? `<span>${esc(b.date)}</span>` : ''}</div>
+    <div class="adv-dos-b">${body || '<div class="empty">لا بنود.</div>'}</div>
+    ${b.note ? `<div class="adv-dos-note">${esc(b.note)}</div>` : ''}</div>`;
+}
+
+function advMsgHTML(m) {
+  const t = esc(m.text).replace(/\n/g, '<br>');
+  if (m.role === 'user') return `<div class="adv-m u"><div class="adv-m-b">${t}</div></div>`;
+  const nm = ADV.state && ADV.state.advisor ? ADV.state.advisor.name : 'المستشار';
+  return `<div class="adv-m a"><div class="adv-m-h">${esc(nm)} · المستشار العام</div><div class="adv-m-b">${t}</div></div>`;
+}
+
+function advRenderModes() {
+  const el = document.getElementById('adv-modes');
+  if (!el) return;
+  const modes = [[1, 'مستشار', 'يقترح فقط — لا ينفذ'], [2, 'مساعد تنفيذي', 'ينفذ بإذنك دائمًا'], [3, 'مدير مفوض', 'يدير ما تفوّضه تلقائيًا']];
+  el.innerHTML = modes.map(([v, t, d]) =>
+    `<button class="adv-mode${ADV.modeSel === v ? ' sel' : ''}" onclick="advMode(${v})">${t}<p>${d}</p></button>`).join('');
+  const dm = document.getElementById('adv-domains');
+  if (dm) {
+    const cur = (ADV.state && ADV.state.advisor.domains) || {};
+    dm.innerHTML = ADV_DOMAINS.map(([k, l]) =>
+      `<label><input type="checkbox" value="${k}"${cur[k] ? ' checked' : ''}${ADV.modeSel === 3 ? '' : ' disabled'}> ${l}</label>`).join('');
+  }
+}
+function advMode(v) { ADV.modeSel = v; advRenderModes(); }
+
+async function advSaveSettings() {
+  const msg = document.getElementById('adv-set-msg');
+  const domains = {};
+  document.querySelectorAll('#adv-domains input[type=checkbox]').forEach((c) => { domains[c.value] = c.checked; });
+  if (msg) msg.textContent = 'جارٍ الحفظ...';
+  try {
+    const r = await api('POST', '/api/advisor/settings', { mode: ADV.modeSel, domains });
+    ADV.state.advisor.mode = r.settings.mode;
+    ADV.state.advisor.domains = r.settings.domains;
+    ADV.state.advisor.autonomy = r.settings.mode === 1 ? 'مستشار' : r.settings.mode === 2 ? 'مساعد تنفيذي' : 'مدير مفوض';
+    if (msg) msg.textContent = 'حُفظت الإعدادات بنجاح.';
+    advRenderModes();
+  } catch (e) { if (msg) msg.textContent = e.message || 'تعذر الحفظ'; }
+}
+
+async function advBrief(kind) {
+  const out = document.getElementById('adv-brief-out');
+  if (!out) return;
+  out.innerHTML = '<div class="spin"></div>';
+  try {
+    const r = await api('GET', '/api/advisor/brief/' + kind);
+    out.innerHTML = _advBriefCard(r.brief);
+  } catch (e) { out.innerHTML = `<div class="empty">${esc(e.message || 'تعذر التحميل')}</div>`; }
+}
+
+function advTaskHTML(t) {
+  return `<div class="adv-task">
+    <div class="adv-task-h"><span>⚠️ قرار يحتاج موافقتك</span><span class="adv-risk ${esc(t.risk || 'low')}">مخاطرة ${esc(ADV_RISK_L[t.risk] || t.risk || 'منخفضة')}</span></div>
+    <div class="adv-task-t">${esc(t.title)}</div>
+    ${t.detail ? `<div class="adv-task-d">${esc(t.detail)}</div>` : ''}
+    <div class="adv-task-date">${esc(t.date || '')}</div>
+    <div class="adv-task-btns"><button class="btn sm" onclick="advDecide(${t.id},1)">موافقة</button>
+    <button class="btn ghost sm" onclick="advDecide(${t.id},0)">رفض</button></div></div>`;
+}
+async function advLoadTasks() {
+  try {
+    const r = await api('GET', '/api/advisor/tasks');
+    ADV.tasks = r.tasks || [];
+    const box = document.getElementById('adv-tasks');
+    if (box) box.innerHTML = ADV.tasks.length ? ADV.tasks.map(advTaskHTML).join('') : '<div class="empty">لا قرارات معلقة — المستشار بانتظار توجيهاتك.</div>';
+    const n = document.getElementById('adv-task-n');
+    if (n) n.textContent = ADV.tasks.length;
+  } catch (e) { /* تجاهل */ }
+}
+async function advDecide(id, okv) {
+  try {
+    await api('POST', `/api/advisor/tasks/${id}/${okv ? 'approve' : 'reject'}`);
+    advLoadTasks();
+    try {
+      const st = await api('GET', '/api/advisor/state');
+      ADV.state = st;
+      const p = document.getElementById('adv-pend');
+      if (p) p.textContent = st.pending_approvals;
+    } catch (e) { /* تجاهل */ }
+  } catch (e) { alert(e.message || 'تعذر تنفيذ القرار'); }
+}
+
+async function advSend(preset) {
+  const inp = document.getElementById('adv-text');
+  const text = String(preset || (inp && inp.value) || '').trim();
+  if (!text) return;
+  if (inp) inp.value = '';
+  const box = document.getElementById('adv-chat');
+  if (!box) return;
+  box.insertAdjacentHTML('beforeend', advMsgHTML({ role: 'user', text }));
+  box.scrollTop = box.scrollHeight;
+  const tp = document.createElement('div');
+  tp.className = 'adv-m a';
+  tp.innerHTML = '<div class="adv-m-b"><div class="spin"></div></div>';
+  box.appendChild(tp);
+  box.scrollTop = box.scrollHeight;
+  try {
+    const r = await api('POST', '/api/advisor/chat', { text });
+    tp.remove();
+    box.insertAdjacentHTML('beforeend', advMsgHTML({ role: 'advisor', text: r.reply }));
+    if (r.brief) {
+      const out = document.getElementById('adv-brief-out');
+      if (out) out.innerHTML = _advBriefCard(r.brief);
+    }
+    if (r.tasks && r.tasks.length) advLoadTasks();
+  } catch (e) {
+    tp.remove();
+    box.insertAdjacentHTML('beforeend', advMsgHTML({ role: 'advisor', text: 'المستشار غير متاح مؤقتًا — اللعبة تعمل طبيعيًا. حاول مجددًا.' }));
+  }
+  box.scrollTop = box.scrollHeight;
+}
+
+async function vAdvisor() {
+  if (!me) { location.hash = '#/login'; return; }
+  if (!me.country_code) { app.innerHTML = thead('المستشار') + '<div class="empty">اختر دولة أولًا ليكون لك مستشار.</div>'; return; }
+  app.innerHTML = thead('المستشار') + '<div class="adv" id="advbody"><div class="spin"></div></div>';
+  let st;
+  try {
+    const [s, tk, hs] = await Promise.all([
+      api('GET', '/api/advisor/state'),
+      api('GET', '/api/advisor/tasks'),
+      api('GET', '/api/advisor/history'),
+    ]);
+    st = s; ADV.state = s; ADV.tasks = tk.tasks || []; ADV.hist = hs.messages || []; ADV.modeSel = s.advisor.mode || 1;
+  } catch (e) {
+    document.getElementById('advbody').innerHTML = `<div class="empty">${esc(e.message || 'المستشار غير متاح مؤقتًا')}</div>`;
+    return;
+  }
+  const a = st.advisor, c = countryOf(st.country.code), cards = st.cards || {};
+  const cardDef = [['الخزينة', cards.treasury], ['الاقتصاد', cards.economy], ['الجيش', cards.military], ['الاستقرار', cards.stability], ['الحرب', cards.war], ['الدبلوماسية', cards.diplomacy], ['الاستخبارات', cards.intel]];
+  document.getElementById('advbody').innerHTML = `
+    <div class="adv-head">
+      <div class="adv-head-top"><span class="adv-logo">ARGOS AI</span><span class="adv-online"><i></i> ${esc(a.status || 'متصل')}</span></div>
+      <div class="adv-head-title">المستشار العام</div>
+      <div class="adv-head-country">${esc(c.flag)} ${esc(st.country.name)} — ${esc(a.name)}</div>
+      <div class="adv-head-meta">النموذج: ${esc(a.model || 'ARGOS ADVISOR')} · الدور: ${esc(a.role || 'Chief State Advisor')}</div>
+    </div>
+    <div class="adv-sec"><div class="adv-sec-t">موجز الدولة — ${esc(st.country.date || '')}</div>
+      <div class="adv-cards">${cardDef.map(([k, v]) => `<div class="adv-card"><div class="k">${k}</div><div class="v">${esc(v || 'غير متاح')}</div></div>`).join('')}</div>
+    </div>
+    <div class="adv-sec"><div class="adv-sec-t">لوحة الحالة</div>
+      <div class="adv-status">
+        <span class="k">AI STATUS</span><span class="v adv-online"><i></i> ONLINE</span>
+        <span class="k">MODEL</span><span class="v">${esc(a.model || 'ARGOS ADVISOR')}</span>
+        <span class="k">ROLE</span><span class="v">${esc(a.role || 'Chief State Advisor')}</span>
+        <span class="k">AUTONOMY</span><span class="v">${esc(a.autonomy || '')}</span>
+        <span class="k">ACTIVE TASKS</span><span class="v">${st.active_tasks}</span>
+        <span class="k">PENDING APPROVALS</span><span class="v" id="adv-pend">${st.pending_approvals}</span>
+        <span class="k">LAST UPDATE</span><span class="v">${esc(st.last_update || '')}</span>
+      </div>
+    </div>
+    <div class="adv-sec"><div class="adv-sec-t">مستوى الاستقلالية</div>
+      <div class="adv-modes" id="adv-modes"></div>
+      <div class="adv-domains" id="adv-domains"></div>
+      <p class="hint">مجالات التفويض تُفعَّل في وضع «مدير مفوض» فقط — والقرارات الحساسة تبقى بموافقتك دائمًا.</p>
+      <div class="me-btns"><button class="btn sm" onclick="advSaveSettings()">حفظ الإعدادات</button></div>
+      <div id="adv-set-msg" class="hint"></div>
+    </div>
+    <div class="adv-sec"><div class="adv-sec-t">تقارير المستشار</div>
+      <div class="adv-brief-btns">
+        <button onclick="advBrief('economic')">تحليل الاقتصاد</button>
+        <button onclick="advBrief('military')">تحليل الجيش</button>
+        <button onclick="advBrief('diplomacy')">الموجز الدبلوماسي</button>
+        <button onclick="advBrief('intel')">تقرير استخباري</button>
+        <button onclick="advBrief('daily')">الموجز اليومي</button>
+      </div>
+      <div id="adv-brief-out"><p class="hint">اختر تقريرًا ليعرضه المستشار من واقع سجلات دولتك.</p></div>
+    </div>
+    <div class="adv-sec"><div class="adv-sec-t">الإجراءات المعلقة (<span id="adv-task-n">${ADV.tasks.length}</span>)</div>
+      <div id="adv-tasks">${ADV.tasks.length ? ADV.tasks.map(advTaskHTML).join('') : '<div class="empty">لا قرارات معلقة — المستشار بانتظار توجيهاتك.</div>'}</div>
+    </div>
+    <div class="adv-sec"><div class="adv-sec-t">مكتب المستشار — المحادثة</div>
+      <div class="adv-quick">
+        <button onclick="advSend('ما هي حالة دولتي؟')">تحليل الدولة</button>
+        <button onclick="advSend('حلل الاقتصاد')">تحليل الاقتصاد</button>
+        <button onclick="advSend('حلل وضعي العسكري')">تحليل الجيش</button>
+        <button onclick="advBrief('daily')">آخر الأخبار</button>
+        <button onclick="advSend('أريد تقريرًا استخباريًا')">تقرير استخباراتي</button>
+        <button onclick="advSend('اجتماع مجلس الوزراء')">اجتماع مجلس الوزراء</button>
+        <button onclick="document.getElementById('adv-tasks').scrollIntoView({behavior:'smooth'})">القرارات المعلقة</button>
+      </div>
+      <div class="adv-chat" id="adv-chat">${ADV.hist.map(advMsgHTML).join('') || '<div class="empty">ابدأ الحديث مع مستشارك — سيدي.</div>'}</div>
+      <div class="adv-input">
+        <input id="adv-text" placeholder="اكتب للمستشار... (مثال: حلل الاقتصاد)" onkeydown="if(event.key==='Enter')advSend()">
+        <button class="btn" onclick="advSend()">${ICONS.send}</button>
+      </div>
+    </div>`;
+  advRenderModes();
+  const ch = document.getElementById('adv-chat');
+  if (ch) ch.scrollTop = ch.scrollHeight;
+}
+
+// ---------- مجلس الوزراء ----------
+async function vCabinet() {
+  if (!me) { location.hash = '#/login'; return; }
+  if (!me.country_code) { app.innerHTML = thead('مجلس الوزراء') + '<div class="empty">اختر دولة أولًا.</div>'; return; }
+  app.innerHTML = thead('مجلس الوزراء') + `<div class="adv">
+    <div class="adv-head"><div class="adv-head-top"><span class="adv-logo">ARGOS AI</span><span class="adv-online"><i></i> متصل</span></div>
+      <div class="adv-head-title">🏛️ مجلس الوزراء</div>
+      <div class="adv-head-country">${esc(countryOf(me.country_code).flag)} ${esc(countryOf(me.country_code).name)}</div></div>
+    <div class="adv-sec"><div class="adv-sec-t">جلسة وزارية</div>
+      <p class="hint">اجمع وزراءك لسماع مداخلاتهم حول وضع الدولة — كل وزير يقرأ من السجلات الحقيقية. القرار الأخير لك وحدك.</p>
+      <div class="me-btns"><button class="btn sm" onclick="advMeet()">عقد اجتماع</button></div>
+      <div id="cab-out" style="margin-top:10px"></div>
+    </div></div>`;
+}
+async function advMeet() {
+  const out = document.getElementById('cab-out');
+  if (!out) return;
+  out.innerHTML = '<div class="spin"></div>';
+  try {
+    const r = await api('GET', '/api/advisor/brief/cabinet');
+    out.innerHTML = _advBriefCard(r.brief);
+  } catch (e) { out.innerHTML = `<div class="empty">${esc(e.message || 'تعذر عقد الاجتماع')}</div>`; }
+}
+
 function navKey(h) {
   if (h === '#/' || h === '') return '#/';
   if (h.startsWith('#/cat/')) return '#/cat/' + h.split('/')[2];
-  if (h === '#/dispatches' || h === '#/dossiers' || h === '#/news' || h === '#/wars' || h === '#/diplomacy' || h === '#/intel' || h === '#/audit' || h === '#/economy' || h === '#/market' || h === '#/notifications' || h === '#/dash' || h === '#/login' || h === '#/messages') return h;
+  if (h === '#/dispatches' || h === '#/dossiers' || h === '#/news' || h === '#/wars' || h === '#/diplomacy' || h === '#/intel' || h === '#/audit' || h === '#/economy' || h === '#/market' || h === '#/notifications' || h === '#/dash' || h === '#/login' || h === '#/messages' || h === '#/advisor' || h === '#/cabinet') return h;
   if (h.startsWith('#/economy/')) return '#/economy';
   if (h.startsWith('#/messages/')) return '#/messages';
   if (h.startsWith('#/d/')) return '#/dispatches';
@@ -2747,6 +3001,8 @@ async function route() {
     else if (h === '#/wars') await vWars();
     else if (h === '#/diplomacy') await vDiplomacy();
     else if (h === '#/intel') await vIntel();
+    else if (h === '#/advisor') await vAdvisor();
+    else if (h === '#/cabinet') await vCabinet();
     else if (h === '#/audit') await vAudit();
     else if (h === '#/economy') await vEconomy();
     else if (h.startsWith('#/economy/')) await vEconomyDetail(h.split('/')[2]);
