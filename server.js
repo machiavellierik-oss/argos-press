@@ -588,6 +588,8 @@ app.get('/api/clock', ah(async (req, res) => {
 app.post('/api/clock/start', ah(auth), requireDeveloper, ah(async (req, res) => {
   const now = Date.now();
   await q('UPDATE game_clock SET started_at=$1, running=1, updated_by=$2 WHERE id=1', [now, req.user.id]);
+  await q('UPDATE companies SET last_collect=NULL');
+  await q('UPDATE country_economy SET last_tax_collect=NULL');
   res.json({ ok: true, running: true, started_at: now, game: gameDateOf(now, now) });
 }));
 app.post('/api/clock/stop', ah(auth), requireDeveloper, ah(async (req, res) => {
@@ -598,6 +600,8 @@ app.post('/api/clock/stop', ah(auth), requireDeveloper, ah(async (req, res) => {
 app.post('/api/clock/reset', ah(auth), requireDeveloper, ah(async (req, res) => {
   const now = Date.now();
   await q('UPDATE game_clock SET started_at=$1, running=1, updated_by=$2 WHERE id=1', [now, req.user.id]);
+  await q('UPDATE companies SET last_collect=NULL');
+  await q('UPDATE country_economy SET last_tax_collect=NULL');
   res.json({ ok: true, running: true, started_at: now, game: gameDateOf(now, now) });
 }));
 
@@ -823,10 +827,19 @@ const SECTORS = ['صناعية', 'عسكرية', 'تجارية', 'زراعية',
 let GEO_CITIES = {}, GEO_CONT = {};
 try { GEO_CITIES = require('./server/data/cities-1900.json'); } catch (e) { /* بلا ملف مدن */ }
 try { GEO_CONT = require('./server/data/continents.json'); } catch (e) { /* بلا ملف قارات */ }
+// الموارد الطبيعية: احتياطيات تقديرية لأغراض اللعب + قواعد الإنتاج
+const RES_AR = { oil: 'النفط', gas: 'الغاز الطبيعي', iron: 'الحديد', coal: 'الفحم', grain: 'الحبوب', cotton: 'القطن' };
+const RES_UNIT = { oil: 'برميل', gas: 'م³', iron: 'طن', coal: 'طن', grain: 'طن', cotton: 'طن' };
+// إنتاج العامل الواحد شهريًا (شهر لعبة) بوحدة المورد — قواعد اللعبة
+const RES_RATE = { oil: 10, gas: 15, iron: 5, coal: 8, grain: 12, cotton: 6 };
+const MAX_WORKERS = 20000;
+let RESERVES = {};
+try { RESERVES = require('./server/data/resources-1900.json'); } catch (e) { /* بلا ملف موارد */ }
 const citiesOf = (cc) => (GEO_CITIES && GEO_CITIES[cc]) || [];
 const continentOf = (cc) => (GEO_CONT && GEO_CONT[cc]) || null;
 const cname = (cc) => { const c = COUNTRIES.find((x) => x.code === cc); return c ? c.name : cc; };
-const canSeeAllEcon = (u) => u && (isDeveloper(u) || isStaff(u));
+// كل لاعب يرى اقتصاد دولته فقط — الرؤية الشاملة للمطورين فقط
+const canSeeAllEcon = (u) => isDeveloper(u);
 const GAME_DAY_MS = 4 * 60 * 1000; // يوم اللعبة = 4 دقائق حقيقية (ساعتان حقيقيتان = شهر لعبة من 30 يومًا)
 function deliveryGameDays(buyerCC, sellerCC) {
   const a = continentOf(buyerCC), b = continentOf(sellerCC);
@@ -839,7 +852,7 @@ async function notify(userId, ntype, title, body, link) {
     [userId, ntype, title, body, link || null, Date.now()]);
 }
 async function ownersOf(cc) {
-  const rows = await all(`SELECT id FROM users WHERE country_code=$1 AND role='player' AND COALESCE(banned,0)=0`, [cc]);
+  const rows = await all(`SELECT id FROM users WHERE country_code=$1 AND role NOT IN ('system','developer') AND COALESCE(banned,0)=0`, [cc]);
   return rows.map((r) => r.id);
 }
 async function devIds() {
@@ -857,6 +870,42 @@ async function deductLiquidity(cc, amountUsd) {
 async function addLiquidity(cc, amountUsd) {
   if (!(amountUsd > 0)) return;
   await q('UPDATE country_economy SET liquidity_m_usd = COALESCE(liquidity_m_usd,0) + $2 WHERE country_code=$1', [cc, amountUsd]);
+}
+// سجل حركات السيولة: كل عملية شراء/بيع/جباية/تأسيس تُسجَّل هنا
+async function logLiq(cc, amount, reason, actor) {
+  try {
+    await q('INSERT INTO liquidity_log (country_code,amount,reason,actor,created_at) VALUES ($1,$2,$3,$4,$5)',
+      [cc, Math.round(Number(amount) * 100) / 100, reason, actor || null, Date.now()]);
+  } catch (e) { /* غير حرج */ }
+}
+// مخزون الموارد المنتَجة
+async function getStock(cc, res2) {
+  const r = await one('SELECT stock FROM country_stocks WHERE country_code=$1 AND resource=$2', [cc, res2]);
+  return r ? Number(r.stock) || 0 : 0;
+}
+async function addStock(cc, res2, delta) {
+  const ex = await one('SELECT stock FROM country_stocks WHERE country_code=$1 AND resource=$2', [cc, res2]);
+  if (ex) await q('UPDATE country_stocks SET stock = stock + $3 WHERE country_code=$1 AND resource=$2', [cc, res2, delta]);
+  else await q('INSERT INTO country_stocks (country_code,resource,stock) VALUES ($1,$2,$3)', [cc, res2, delta]);
+}
+// الكمية المحجوزة من مورد (عروض نشطة + شحنات في الطريق)
+async function reservedStock(cc, res2) {
+  const l = await one(`SELECT COALESCE(SUM(qty),0) s FROM market_listings WHERE seller_country=$1 AND resource=$2 AND status='active'`, [cc, res2]);
+  const o = await one(`SELECT COALESCE(SUM(qty),0) s FROM market_orders WHERE seller_country=$1 AND resource=$2 AND status='in_transit'`, [cc, res2]);
+  return (Number(l.s) || 0) + (Number(o.s) || 0);
+}
+// زمن اللعبة = المنقضي منذ تشغيل الساعة؛ والشهر = 30 يوم لعبة (ساعتان حقيقيتان)
+function gameMonthMs() { return GAME_MONTH_MS; }
+function gameMonthIdx(ts) { return Math.floor(Number(ts || 0) / gameMonthMs()); }
+async function gameNow() {
+  const row = await one('SELECT started_at FROM game_clock WHERE id=1');
+  const st = row && row.started_at ? Number(row.started_at) : null;
+  return st ? Math.max(0, Date.now() - st) : 0;
+}
+// الجباية/الجمع متاح إذا لم يحدث من قبل أو دخلنا شهر لعبة جديدًا
+function canCollectNow(nowG, lastTs) {
+  if (lastTs == null) return true;
+  return gameMonthIdx(nowG) > gameMonthIdx(lastTs);
 }
 async function seedEconomy() {
   await q(`CREATE TABLE IF NOT EXISTS country_economy (
@@ -897,6 +946,19 @@ async function seedEconomy() {
     game_days INTEGER NOT NULL,
     status TEXT DEFAULT 'in_transit', deliver_at BIGINT, created_at BIGINT
   )`);
+  // مخزون الموارد المنتَجة لكل دولة + سجل حركات السيولة
+  await q(`CREATE TABLE IF NOT EXISTS country_stocks (
+    country_code TEXT NOT NULL, resource TEXT NOT NULL, stock DOUBLE PRECISION DEFAULT 0,
+    PRIMARY KEY (country_code, resource)
+  )`);
+  await q(`CREATE TABLE IF NOT EXISTS resource_extracted (
+    country_code TEXT NOT NULL, resource TEXT NOT NULL, extracted DOUBLE PRECISION DEFAULT 0,
+    PRIMARY KEY (country_code, resource)
+  )`);
+  await q(`CREATE TABLE IF NOT EXISTS liquidity_log (
+    id SERIAL PRIMARY KEY, country_code TEXT, amount DOUBLE PRECISION,
+    reason TEXT, actor TEXT, created_at BIGINT
+  )`);
   // ترقية قواعد البيانات القديمة
   for (const colDef of [
     'liquidity_m_usd DOUBLE PRECISION',
@@ -907,6 +969,26 @@ async function seedEconomy() {
     "ctype TEXT DEFAULT 'national'", "status TEXT DEFAULT 'approved'",
     'host_country TEXT', 'capital_usd DOUBLE PRECISION',
   ]) { try { await q(`ALTER TABLE companies ADD COLUMN ${colDef}`); } catch (e) { /* موجود */ } }
+  for (const colDef of [
+    'tax_rate DOUBLE PRECISION DEFAULT 10', 'last_tax_collect BIGINT',
+    'revolt_active INTEGER DEFAULT 0',
+  ]) { try { await q(`ALTER TABLE country_economy ADD COLUMN ${colDef}`); } catch (e) { /* موجود */ } }
+  for (const colDef of [
+    'resource_kind TEXT', 'workers INTEGER DEFAULT 0', 'last_collect BIGINT',
+  ]) { try { await q(`ALTER TABLE companies ADD COLUMN ${colDef}`); } catch (e) { /* موجود */ } }
+  for (const colDef of [
+    "kind TEXT DEFAULT 'weapon'", 'title TEXT', 'unit TEXT', 'resource TEXT',
+  ]) {
+    try { await q(`ALTER TABLE market_listings ADD COLUMN ${colDef}`); } catch (e) { /* موجود */ }
+    try { await q(`ALTER TABLE market_orders ADD COLUMN ${colDef}`); } catch (e) { /* موجود */ }
+  }
+  await q('UPDATE country_economy SET tax_rate=10 WHERE tax_rate IS NULL');
+  // عروض الموارد لا تحمل weapon_id
+  for (const t of ['market_listings', 'market_orders']) {
+    try { await q(`ALTER TABLE ${t} ALTER COLUMN weapon_id DROP NOT NULL`); } catch (e) { /* مدعوم */ }
+  }
+  await q("UPDATE market_listings SET kind='weapon' WHERE kind IS NULL");
+  await q("UPDATE market_orders SET kind='weapon' WHERE kind IS NULL");
   await q(`UPDATE companies SET host_country=country_code WHERE host_country IS NULL`);
   await q(`UPDATE companies SET capital_usd=capital WHERE capital_usd IS NULL`);
   await q(`CREATE TABLE IF NOT EXISTS seed_meta (key TEXT PRIMARY KEY, value TEXT)`);
@@ -981,13 +1063,18 @@ function companyRow(c) {
     capital: c.capital == null ? null : Number(c.capital),
     capital_usd: c.capital_usd == null ? null : Number(c.capital_usd),
     description: c.description, created_at: Number(c.created_at),
+    resource_kind: c.resource_kind || null,
+    resource_name: c.resource_kind ? RES_AR[c.resource_kind] : null,
+    resource_unit: c.resource_kind ? RES_UNIT[c.resource_kind] : null,
+    workers: Number(c.workers) || 0,
+    last_collect: c.last_collect == null ? null : Number(c.last_collect),
   };
 }
 // بيانات جغرافية للنماذج (مدن كل دولة + قارتها)
 app.get('/api/meta/geo', ah(auth), ah(async (req, res) => {
   res.json({ cities: GEO_CITIES, continents: GEO_CONT });
 }));
-// نظرة عامة — كل لاعب يرى اقتصاد دولته فقط (المطورون والإدارة يرون الكل)
+// نظرة عامة — كل لاعب يرى اقتصاد دولته فقط (المطورون فقط يرون الكل)
 app.get('/api/economy', ah(auth), ah(async (req, res) => {
   const full = canSeeAllEcon(req.user);
   const rows = full
@@ -1002,7 +1089,7 @@ app.get('/api/economy', ah(auth), ah(async (req, res) => {
     sectors: SECTORS, full,
   });
 }));
-// تفاصيل دولة — اقتصاد دولتك فقط (أو الكل للمطورين/الإدارة)
+// تفاصيل دولة — اقتصاد دولتك فقط (أو الكل للمطورين فقط)
 app.get('/api/economy/:code', ah(auth), ah(async (req, res) => {
   const cc = String(req.params.code || '').toUpperCase();
   if (!validCountry(cc)) return res.status(400).json({ error: 'كود دولة غير صالح' });
@@ -1016,11 +1103,44 @@ app.get('/api/economy/:code', ah(auth), ah(async (req, res) => {
                           LEFT JOIN users u ON u.id=c.owner_id
                           WHERE c.owner_id=$1 AND c.host_country!=$2 ORDER BY c.created_at DESC`,
     [req.user.id, cc]);
+  // الضرائب: المبلغ القابل للجباية شهريًا = الناتج السنوي × النسبة ÷ 12
+  const taxRate = e && e.tax_rate != null ? Number(e.tax_rate) : 10;
+  const revolt = !!(e && e.revolt_active);
+  const gdp = e && e.gdp_m_intl != null ? Number(e.gdp_m_intl) : null;
+  const liq = e && e.liquidity_m_usd != null ? Number(e.liquidity_m_usd) : null;
+  const taxBase = gdp || (liq != null ? liq / 0.04 : 0);
+  const collectAmount = Math.round(taxBase * (taxRate / 100) / 12);
+  const nowG = await gameNow();
+  const canCollect = !revolt && canCollectNow(nowG, e ? e.last_tax_collect : null);
+  // الموارد: الاحتياطيات التقديرية + المخزون المنتَج
+  const resInfo = (RESERVES[cc] && typeof RESERVES[cc] === 'object') ? RESERVES[cc] : {};
+  const resources = [];
+  for (const k of Object.keys(RES_AR)) {
+    resources.push({
+      kind: k, name: RES_AR[k], unit: RES_UNIT[k],
+      reserves: Number(resInfo[k]) || 0,
+      stock: await getStock(cc, k),
+    });
+  }
+  // البطالة: قوة العمل ≈ 35% من السكان، والموظفون = عمال الشركات المعتمدة
+  const wsum = await one(`SELECT COALESCE(SUM(workers),0) s FROM companies WHERE host_country=$1 AND status='approved'`, [cc]);
+  const gameWorkers = Number(wsum.s) || 0;
+  const employed = gameWorkers * 100;
+  const pop = e && e.population ? Number(e.population) : null;
+  const laborForce = pop ? Math.round(pop * 0.35) : null;
+  const unempRate = laborForce ? Math.max(0, Math.round((laborForce - employed) / laborForce * 1000) / 10) : null;
+  const liqLog = await all('SELECT amount,reason,actor,created_at FROM liquidity_log WHERE country_code=$1 ORDER BY id DESC LIMIT 12', [cc]);
   res.json({
     economy: e ? econRow(e) : null,
+    tax_rate: taxRate, revolt_active: revolt,
+    collect_amount: collectAmount, can_collect: canCollect,
+    last_tax_collect: e && e.last_tax_collect != null ? Number(e.last_tax_collect) : null,
+    resources, unemployment: { labor_force: laborForce, employed, game_workers: gameWorkers, worker_scale: 100, rate: unempRate },
+    liquidity_log: liqLog.map((x) => ({ amount: Number(x.amount), reason: x.reason, actor: x.actor, created_at: Number(x.created_at) })),
     companies: cos.map(companyRow),
     my_companies_abroad: mine.map(companyRow),
     sectors: SECTORS, cities: citiesOf(cc),
+    resource_kinds: Object.keys(RES_AR).map((k) => ({ kind: k, name: RES_AR[k], unit: RES_UNIT[k], rate: RES_RATE[k] })),
     full: canSeeAllEcon(req.user),
   });
 }));
@@ -1044,6 +1164,12 @@ function cleanCompany(b, founderCC) {
   const list = citiesOf(hostCC);
   if (list.length && !list.includes(city)) throw new Error('المدينة يجب أن تكون من مدن ' + cname(hostCC));
   out.city = city;
+  const rk = b.resource_kind || null;
+  if (rk && !RES_AR[rk]) throw new Error('تخصص المورد غير صالح');
+  out.resource_kind = rk;
+  const wk = parseInt(b.workers, 10) || 0;
+  if (wk < 0 || wk > MAX_WORKERS) throw new Error('عدد العمال يجب أن يكون بين 0 و ' + MAX_WORKERS.toLocaleString('en-US'));
+  out.workers = wk;
   const capLocal = Number(b.capital);
   if (!(capLocal > 0)) throw new Error('رأس المال مطلوب (بملايين عملة الدولة المضيفة)');
   out.capital = capLocal;
@@ -1069,12 +1195,13 @@ app.post('/api/companies', ah(auth), ah(async (req, res) => {
   if (status === 'approved') {
     const ok = await deductLiquidity(c.host_country, capUsd);
     if (!ok) return res.status(400).json({ error: 'سيولة ' + cname(c.host_country) + ' لا تكفي لرأس المال المطلوب' });
+    await logLiq(c.host_country, -capUsd, `تأسيس شركة «${c.name}» (${c.city})`, req.user.username);
   }
   const r = await q(`INSERT INTO companies (country_code,host_country,owner_id,ctype,status,name,sector,city,
-                     capital,capital_usd,description,created_at,updated_at)
-                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12) RETURNING id`,
+                     capital,capital_usd,description,resource_kind,workers,created_at,updated_at)
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14) RETURNING id`,
     [founderCC, c.host_country, req.user.id, c.ctype, status, c.name, c.sector, c.city,
-     c.capital, capUsd, c.description, Date.now()]);
+     c.capital, capUsd, c.description, c.resource_kind, c.workers, Date.now()]);
   const id = r.rows[0].id;
   if (status === 'pending') {
     const owners = await ownersOf(c.host_country);
@@ -1144,9 +1271,44 @@ app.put('/api/companies/:id', ah(auth), ah(async (req, res) => {
   const list = citiesOf(row.host_country);
   if (list.length && !list.includes(city)) return res.status(400).json({ error: 'المدينة يجب أن تكون من مدن ' + cname(row.host_country) });
   const desc = typeof b.description === 'string' && b.description.trim() ? b.description.trim().slice(0, 500) : null;
-  await q(`UPDATE companies SET name=$1,sector=$2,city=$3,description=$4,updated_at=$5 WHERE id=$6`,
-    [b.name.trim().slice(0, 120), b.sector, city, desc, Date.now(), req.params.id]);
+  const rk = b.resource_kind || null;
+  if (rk && !RES_AR[rk]) return res.status(400).json({ error: 'تخصص المورد غير صالح' });
+  const wk = Math.max(0, Math.min(MAX_WORKERS, parseInt(b.workers, 10) || 0));
+  await q(`UPDATE companies SET name=$1,sector=$2,city=$3,description=$4,resource_kind=$5,workers=$6,updated_at=$7 WHERE id=$8`,
+    [b.name.trim().slice(0, 120), b.sector, city, desc, rk, wk, Date.now(), req.params.id]);
   res.json({ ok: true });
+}));
+// جمع إنتاج الشركة — شهريًا بزمن اللعبة: كل عامل ينتج كمية ثابتة حسب المورد
+app.post('/api/companies/:id/collect', ah(auth), ah(async (req, res) => {
+  const row = await one('SELECT * FROM companies WHERE id=$1', [req.params.id]);
+  if (!row) return res.status(404).json({ error: 'الشركة غير موجودة' });
+  if (row.status !== 'approved') return res.status(400).json({ error: 'الشركة لم تُعتمد بعد' });
+  const dev = isDeveloper(req.user);
+  if (!dev && row.owner_id !== req.user.id) return res.status(403).json({ error: 'غير مصرح' });
+  if (!row.resource_kind || !RES_AR[row.resource_kind])
+    return res.status(400).json({ error: 'هذه الشركة غير متخصصة في استخراج مورد — حدد تخصصها أولًا' });
+  const workers = Number(row.workers) || 0;
+  if (workers <= 0) return res.status(400).json({ error: 'حدد عدد العمال أولًا' });
+  const nowG = await gameNow();
+  if (!canCollectNow(nowG, row.last_collect))
+    return res.status(400).json({ error: 'تم جمع إنتاج هذا الشهر — عُد الشهر القادم (شهر لعبة)' });
+  const reserveTotal = Number((RESERVES[row.host_country] || {})[row.resource_kind]) || 0;
+  const exRow = await one('SELECT extracted FROM resource_extracted WHERE country_code=$1 AND resource=$2', [row.host_country, row.resource_kind]);
+  const extractedSoFar = exRow ? Number(exRow.extracted) || 0 : 0;
+  const remaining = reserveTotal - extractedSoFar;
+  if (remaining <= 0)
+    return res.status(400).json({ error: 'نفد احتياطي ' + RES_AR[row.resource_kind] + ' في ' + cname(row.host_country) });
+  let amount = Math.floor(Math.min(workers * RES_RATE[row.resource_kind], remaining));
+  if (amount <= 0) return res.status(400).json({ error: 'لا يوجد إنتاج متاح هذا الشهر' });
+  await addStock(row.host_country, row.resource_kind, amount);
+  if (exRow) await q('UPDATE resource_extracted SET extracted = extracted + $3 WHERE country_code=$1 AND resource=$2',
+    [row.host_country, row.resource_kind, amount]);
+  else await q('INSERT INTO resource_extracted (country_code,resource,extracted) VALUES ($1,$2,$3)',
+    [row.host_country, row.resource_kind, amount]);
+  await q('UPDATE companies SET last_collect=$2 WHERE id=$1', [row.id, nowG]);
+  await logLiq(row.host_country, 0, `إنتاج ${RES_AR[row.resource_kind]}: ${amount.toLocaleString('en-US')} ${RES_UNIT[row.resource_kind]} من «${row.name}» (${workers.toLocaleString('en-US')} عامل)`, req.user.username);
+  res.json({ ok: true, amount, unit: RES_UNIT[row.resource_kind], resource: RES_AR[row.resource_kind],
+             stock: await getStock(row.host_country, row.resource_kind), reserve_remaining: remaining - amount });
 }));
 // حذف شركة — مالكها أو المطورون
 app.delete('/api/companies/:id', ah(auth), ah(async (req, res) => {
@@ -1157,11 +1319,57 @@ app.delete('/api/companies/:id', ah(auth), ah(async (req, res) => {
   await q('DELETE FROM companies WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
 }));
-// تعديل بيانات اقتصاد دولة — المطورون فقط (يحدّث الحقول المرسلة فقط)
-app.put('/api/economy/:code', ah(auth), requireDeveloper, ah(async (req, res) => {
+// تعديل بيانات اقتصاد دولة — المطورون لكل الحقول، وصاحب الدولة لنسبة الضريبة فقط
+app.put('/api/economy/:code', ah(auth), ah(async (req, res) => {
   const cc = String(req.params.code || '').toUpperCase();
   if (!validCountry(cc)) return res.status(400).json({ error: 'كود دولة غير صالح' });
+  const dev = isDeveloper(req.user);
+  const isOwner = req.user.country_code === cc;
+  if (!dev && !isOwner) return res.status(403).json({ error: 'غير مصرح' });
   const b = req.body || {};
+  // نسبة الضريبة — يحددها صاحب الدولة (0-100)
+  if (b.tax_rate !== undefined) {
+    const nr = Math.max(0, Math.min(100, Number(b.tax_rate) || 0));
+    let row = await one('SELECT tax_rate, revolt_active, liquidity_m_usd FROM country_economy WHERE country_code=$1', [cc]);
+    if (!row) {
+      await q('INSERT INTO country_economy (country_code,tax_rate,updated_by,updated_at) VALUES ($1,$2,$3,$4)',
+        [cc, nr, req.user.id, Date.now()]);
+      row = { tax_rate: nr, revolt_active: 0, liquidity_m_usd: 0 };
+    } else {
+      await q('UPDATE country_economy SET tax_rate=$2, updated_by=$3, updated_at=$4 WHERE country_code=$1',
+        [cc, nr, req.user.id, Date.now()]);
+    }
+    // تجاوز 30%: ثورة شعبية — عصيان مدني: خصم 15% من السيولة + إعلان على الخريطة
+    if (nr > 30 && !row.revolt_active) {
+      const liq = Number(row.liquidity_m_usd) || 0;
+      const loss = Math.round(liq * 0.15);
+      await q('UPDATE country_economy SET liquidity_m_usd = GREATEST(0, COALESCE(liquidity_m_usd,0) - $2), revolt_active=1 WHERE country_code=$1', [cc, loss]);
+      await logLiq(cc, -loss, 'خسائر الثورة الشعبية — عصيان مدني بعد رفع الضرائب فوق 30%', req.user.username);
+      const ms = await one('SELECT status FROM map_states WHERE country_code=$1', [cc]);
+      if (!ms || !['war', 'emergency'].includes(ms.status)) {
+        const ex = await one('SELECT country_code FROM map_states WHERE country_code=$1', [cc]);
+        if (ex) await q(`UPDATE map_states SET color='#ff2222',status='revolt',label='ثورة شعبية — عصيان مدني ضد الضرائب المرتفعة',updated_by=$2,updated_at=$3 WHERE country_code=$1`, [cc, req.user.id, Date.now()]);
+        else await q(`INSERT INTO map_states (country_code,color,status,label,updated_by,updated_at) VALUES ($1,'#ff2222','revolt','ثورة شعبية — عصيان مدني ضد الضرائب المرتفعة',$2,$3)`, [cc, req.user.id, Date.now()]);
+      }
+      const owners = await ownersOf(cc);
+      const tg = owners.length ? owners : await devIds();
+      for (const uid of tg) await notify(uid, 'revolt',
+        'ثورة شعبية في ' + cname(cc) + '!',
+        `الشعب أعلن العصيان المدني بعد رفع الضرائب فوق 30%. خسرت الدولة ${loss.toLocaleString('en-US')} مليون دولار من السيولة، وتوقفت جباية الضرائب حتى تهدأ الأوضاع. اخفض الضريبة لـ30% أو أقل لإنهاء الثورة.`,
+        '#/economy/' + cc);
+    } else if (nr <= 30 && row.revolt_active) {
+      // انتهاء الثورة
+      await q('UPDATE country_economy SET revolt_active=0 WHERE country_code=$1', [cc]);
+      await q("DELETE FROM map_states WHERE country_code=$1 AND status='revolt'", [cc]);
+      const owners = await ownersOf(cc);
+      const tg = owners.length ? owners : await devIds();
+      for (const uid of tg) await notify(uid, 'revolt_end',
+        'انتهت الثورة في ' + cname(cc),
+        'هدأت الأوضاع بعد خفض الضرائب. عادت جباية الضرائب للعمل.', '#/economy/' + cc);
+    }
+    if (!dev) return res.json({ ok: true, tax_rate: nr });
+  }
+  if (!dev) return res.status(403).json({ error: 'بقية الحقول للمطورين فقط' });
   const str = (k, n) => typeof b[k] === 'string' && b[k].trim() ? b[k].trim().slice(0, n) : null;
   const num = (k) => b[k] == null || b[k] === '' ? null : Number(b[k]);
   const conf = (k) => ['documented', 'estimate', 'unknown'].includes(b[k]) ? b[k] : null;
@@ -1196,6 +1404,30 @@ app.put('/api/economy/:code', ah(auth), requireDeveloper, ah(async (req, res) =>
   res.json({ ok: true });
 }));
 
+// جباية الضرائب — مرة كل شهر لعبة: الناتج السنوي × النسبة ÷ 12 (ممنوعة أثناء الثورة)
+app.post('/api/economy/:code/collect-taxes', ah(auth), ah(async (req, res) => {
+  const cc = String(req.params.code || '').toUpperCase();
+  if (!validCountry(cc)) return res.status(400).json({ error: 'كود دولة غير صالح' });
+  const dev = isDeveloper(req.user);
+  if (!dev && req.user.country_code !== cc) return res.status(403).json({ error: 'غير مصرح' });
+  const e = await one('SELECT * FROM country_economy WHERE country_code=$1', [cc]);
+  if (!e) return res.status(400).json({ error: 'لا توجد بيانات اقتصادية' });
+  if (e.revolt_active) return res.status(403).json({ error: 'لا يمكن جباية الضرائب أثناء الثورة الشعبية' });
+  const nowG = await gameNow();
+  if (!canCollectNow(nowG, e.last_tax_collect))
+    return res.status(400).json({ error: 'تمت الجباية هذا الشهر — عُد الشهر القادم (شهر لعبة = ساعتان)' });
+  const rate = e.tax_rate != null ? Number(e.tax_rate) : 10;
+  const gdp = e.gdp_m_intl != null ? Number(e.gdp_m_intl) : null;
+  const liq = e.liquidity_m_usd != null ? Number(e.liquidity_m_usd) : null;
+  const base = gdp || (liq != null ? liq / 0.04 : 0);
+  const amount = Math.round(base * (rate / 100) / 12);
+  await q('UPDATE country_economy SET liquidity_m_usd = COALESCE(liquidity_m_usd,0) + $2, last_tax_collect=$3 WHERE country_code=$1',
+    [cc, amount, nowG]);
+  await logLiq(cc, amount, `جباية الضرائب الشهرية بنسبة ${rate}%`, req.user.username);
+  const ne = await one('SELECT liquidity_m_usd FROM country_economy WHERE country_code=$1', [cc]);
+  res.json({ ok: true, amount, liquidity: Number(ne.liquidity_m_usd) || 0 });
+}));
+
 // ---------- الإشعارات ----------
 app.get('/api/notifications', ah(auth), ah(async (req, res) => {
   const rows = await all(`SELECT * FROM notifications WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50`, [req.user.id]);
@@ -1217,6 +1449,15 @@ app.post('/api/notifications/read-all', ah(auth), ah(async (req, res) => {
 async function processDeliveries() {
   const due = await all(`SELECT * FROM market_orders WHERE status='in_transit' AND deliver_at <= $1`, [Date.now()]);
   for (const o of due) {
+    const isRes = o.kind === 'resource' && o.resource && RES_AR[o.resource];
+    if (isRes) {
+      await addStock(o.seller_country, o.resource, -o.qty);
+      await addStock(o.buyer_country, o.resource, o.qty);
+      await q(`UPDATE market_orders SET status='delivered' WHERE id=$1`, [o.id]);
+      await notify(o.buyer_id, 'market_delivery', 'وصلت شحنة الموارد',
+        `اكتمل تسليم ${o.qty.toLocaleString('en-US')} ${o.unit || ''} ${o.title || ''} إلى مخزون ${cname(o.buyer_country)}.`, `#/market`);
+      continue;
+    }
     const w = await one('SELECT * FROM weapons WHERE id=$1', [o.weapon_id]);
     if (w) {
       await q(`INSERT INTO weapons (country_code,name,class,wtype,model,quantity,image_url,
@@ -1244,22 +1485,42 @@ app.get('/api/market', ah(auth), ah(async (req, res) => {
   res.json({ listings: rows.map((l) => ({
     id: l.id, seller_name: l.seller_name, seller_country: l.seller_country,
     seller_continent: continentOf(l.seller_country),
+    kind: l.kind || 'weapon', title: l.title || l.weapon_name, unit: l.unit || 'قطعة', resource: l.resource || null,
     weapon_id: l.weapon_id, weapon_name: l.weapon_name, weapon_class: l.weapon_class,
     weapon_wtype: l.weapon_wtype, weapon_model: l.weapon_model, weapon_image: l.weapon_image,
     qty: l.qty, price_unit_m_usd: Number(l.price_unit_m_usd),
     created_at: Number(l.created_at),
   })) });
 }));
-// عرض سلاح للبيع — كل لاعب يبيع أسلحة دولته بالسعر الذي يريده
+// عرض للبيع — سلاح من الترسانة أو مورد من المخزون، بالسعر الذي يريده البائع
 app.post('/api/market/listings', ah(auth), ah(async (req, res) => {
   const b = req.body || {};
   const dev = isDeveloper(req.user);
+  const kind = b.kind === 'resource' ? 'resource' : 'weapon';
+  const sellerCC = dev && b.country_code && validCountry(String(b.country_code).toUpperCase())
+    ? String(b.country_code).toUpperCase() : req.user.country_code;
+  if (!sellerCC) return res.status(400).json({ error: 'تحتاج دولة للبيع' });
+  const qty = Math.max(1, parseInt(b.qty, 10) || 0);
+  const price = Number(b.price_unit_m_usd);
+  if (!(price > 0)) return res.status(400).json({ error: 'حدد سعر البيع (بملايين الدولارات للوحدة)' });
+  if (kind === 'resource') {
+    const rk = b.resource;
+    if (!rk || !RES_AR[rk]) return res.status(400).json({ error: 'اختر موردًا صالحًا' });
+    if (!dev && sellerCC !== req.user.country_code)
+      return res.status(403).json({ error: 'يمكنك بيع موارد دولتك فقط' });
+    const stock = await getStock(sellerCC, rk);
+    const avail = stock - await reservedStock(sellerCC, rk);
+    if (qty > avail) return res.status(400).json({ error: `المخزون المتاح للبيع: ${Math.max(0, Math.floor(avail)).toLocaleString('en-US')} ${RES_UNIT[rk]}` });
+    const r = await q(`INSERT INTO market_listings (seller_id,seller_country,weapon_id,qty,price_unit_m_usd,kind,title,unit,resource,created_at)
+                       VALUES ($1,$2,NULL,$3,$4,'resource',$5,$6,$7,$8) RETURNING id`,
+      [req.user.id, sellerCC, qty, price, RES_AR[rk], RES_UNIT[rk], rk, Date.now()]);
+    await logLiq(sellerCC, 0, `عرض ${qty.toLocaleString('en-US')} ${RES_UNIT[rk]} ${RES_AR[rk]} للبيع في السوق`, req.user.username);
+    return res.json({ ok: true, id: r.rows[0].id });
+  }
   const w = await one('SELECT * FROM weapons WHERE id=$1', [b.weapon_id]);
   if (!w) return res.status(404).json({ error: 'السلاح غير موجود' });
   if (!dev && w.country_code !== req.user.country_code)
     return res.status(403).json({ error: 'يمكنك بيع أسلحة دولتك فقط' });
-  const qty = Math.max(1, parseInt(b.qty, 10) || 0);
-  const price = Number(b.price_unit_m_usd);
   if (!(price > 0)) return res.status(400).json({ error: 'حدد سعر البيع (بملايين الدولارات للقطعة)' });
   const cap = w.quantity == null ? 50 : Math.max(0, Number(w.quantity));
   const used = await one(`SELECT COALESCE(SUM(qty),0) s FROM market_listings
@@ -1269,11 +1530,9 @@ app.post('/api/market/listings', ah(auth), ah(async (req, res) => {
                          WHERE l.weapon_id=$1 AND o.status='in_transit'`, [w.id]);
   const avail = cap - (Number(used.s) || 0) - (Number(inT.s) || 0);
   if (qty > avail) return res.status(400).json({ error: `الكمية المتاحة للبيع: ${avail}` });
-  const sellerCC = dev && b.country_code && validCountry(String(b.country_code).toUpperCase())
-    ? String(b.country_code).toUpperCase() : (w.country_code || req.user.country_code);
-  const r = await q(`INSERT INTO market_listings (seller_id,seller_country,weapon_id,qty,price_unit_m_usd,created_at)
-                     VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-    [req.user.id, sellerCC, w.id, qty, price, Date.now()]);
+  const r = await q(`INSERT INTO market_listings (seller_id,seller_country,weapon_id,qty,price_unit_m_usd,kind,title,unit,created_at)
+                     VALUES ($1,$2,$3,$4,$5,'weapon',$6,'قطعة',$7) RETURNING id`,
+    [req.user.id, sellerCC, w.id, qty, price, w.name, Date.now()]);
   res.json({ ok: true, id: r.rows[0].id });
 }));
 // إلغاء عرض — البائع أو المطورون
@@ -1299,18 +1558,20 @@ app.post('/api/market/buy/:id', ah(auth), ah(async (req, res) => {
   const ok = await deductLiquidity(req.user.country_code, total);
   if (!ok) return res.status(400).json({ error: 'سيولة دولتك لا تكفي لإتمام الشراء' });
   await addLiquidity(l.seller_country, total);
+  await logLiq(req.user.country_code, -total, `شراء ${qty.toLocaleString('en-US')} × ${l.title || 'سلعة'} من السوق`, req.user.username);
+  await logLiq(l.seller_country, total, `بيع ${qty.toLocaleString('en-US')} × ${l.title || 'سلعة'} في السوق`, req.user.username);
   const days = deliveryGameDays(req.user.country_code, l.seller_country);
-  const w = await one('SELECT name FROM weapons WHERE id=$1', [l.weapon_id]);
+  const isRes = l.kind === 'resource';
   const r = await q(`INSERT INTO market_orders (listing_id,weapon_id,seller_id,seller_country,
-                     buyer_id,buyer_country,qty,total_m_usd,game_days,status,deliver_at,created_at)
-                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'in_transit',$10,$11) RETURNING id`,
+                     buyer_id,buyer_country,qty,total_m_usd,game_days,kind,title,unit,resource,status,deliver_at,created_at)
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'in_transit',$14,$15) RETURNING id`,
     [l.id, l.weapon_id, l.seller_id, l.seller_country, req.user.id, req.user.country_code,
-     qty, total, days, Date.now() + days * GAME_DAY_MS, Date.now()]);
+     qty, total, days, l.kind || 'weapon', l.title, l.unit, l.resource, Date.now() + days * GAME_DAY_MS, Date.now()]);
   const left = l.qty - qty;
   if (left <= 0) await q(`UPDATE market_listings SET qty=0, status='sold' WHERE id=$1`, [l.id]);
   else await q(`UPDATE market_listings SET qty=$2 WHERE id=$1`, [l.id, left]);
-  await notify(l.seller_id, 'market_sale', 'بيع سلاح جديد',
-    `${req.user.username} (${cname(req.user.country_code)}) اشترى ${qty} × ${w ? w.name : 'سلاح'} مقابل ${total} مليون دولار. المبلغ أُضيف لسيولة ${cname(l.seller_country)}.`,
+  await notify(l.seller_id, 'market_sale', isRes ? 'بيع مورد جديد' : 'بيع سلاح جديد',
+    `${req.user.username} (${cname(req.user.country_code)}) اشترى ${qty.toLocaleString('en-US')} × ${l.title || 'سلعة'} مقابل ${total} مليون دولار. المبلغ أُضيف لسيولة ${cname(l.seller_country)}.`,
     `#/market`);
   res.json({ ok: true, order_id: r.rows[0].id, game_days: days });
 }));
@@ -1325,7 +1586,8 @@ app.get('/api/market/orders', ah(auth), ah(async (req, res) => {
                           LEFT JOIN users u2 ON u2.id=o.buyer_id
                           WHERE o.buyer_id=$1 OR o.seller_id=$1 ORDER BY o.created_at DESC`, [req.user.id]);
   res.json({ orders: rows.map((o) => ({
-    id: o.id, weapon_name: o.weapon_name, weapon_image: o.weapon_image,
+    id: o.id, kind: o.kind || 'weapon', title: o.title || o.weapon_name, unit: o.unit || 'قطعة', resource: o.resource || null,
+    weapon_name: o.weapon_name, weapon_image: o.weapon_image,
     seller_name: o.seller_name, seller_country: o.seller_country,
     buyer_name: o.buyer_name, buyer_country: o.buyer_country,
     qty: o.qty, total_m_usd: Number(o.total_m_usd), game_days: o.game_days,

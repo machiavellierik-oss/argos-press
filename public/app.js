@@ -143,31 +143,37 @@ async function hydrateEngagement(type) {
   } catch (e) { /* تجاهل */ }
 }
 
-// ---------- القائمة الجانبية والودجت ----------
-const NAV = [
-  ['#/', 'الرئيسية', 'home'],
-  ['#/dispatches', 'البرقيات', 'chat'],
-  ['#/messages', 'الرسائل', 'mail'],
-  ['#/cat/official', 'بيانات رسمية', 'mega'],
-  ['#/cat/war', 'سيناريوهات الحروب', 'zap'],
-  ['#/cat/events', 'أحداث اللعبة', 'cal'],
-  ['#/dossiers', 'ملفات العملاء', 'folder'],
-  ['#/news', 'غرفة الحرب', 'globe'],
-  ['#/economy', 'الاقتصاد والسكان', 'coin'],
-  ['#/market', 'سوق السلاح', 'swords'],
-  ['#/notifications', 'الإشعارات', 'bell'],
+// ---------- القائمة الجانبية (درج بأقسام) والودجت ----------
+const NAV_SECTIONS = [
+  { t: '', links: [['#/', 'الرئيسية', 'home']] },
+  { t: 'الحرب', links: [['#/news', 'غرفة الحرب', 'globe']] },
+  { t: 'الاقتصاد', links: [['#/economy', 'الاقتصاد والسكان', 'coin']] },
+  { t: 'التجارة', links: [['#/market', 'السوق العام', 'swords']] },
+  { t: 'الإعلام', links: [
+    ['#/dispatches', 'البرقيات', 'chat'],
+    ['#/cat/official', 'بيانات رسمية', 'mega'],
+    ['#/cat/war', 'سيناريوهات الحروب', 'zap'],
+    ['#/cat/events', 'أحداث اللعبة', 'cal'],
+    ['#/dossiers', 'ملفات العملاء', 'folder'],
+  ]},
+  { t: 'التواصل', links: [
+    ['#/messages', 'الرسائل', 'mail'],
+    ['#/notifications', 'الإشعارات', 'bell'],
+  ]},
 ];
+function closeNav() { document.body.classList.remove('nav-open'); }
 function renderNav(active) {
   const nav = document.getElementById('mainnav');
   const dashLink = me ? ['#/dash', 'حسابي', 'user'] : ['#/login', 'دخول', 'user'];
-  nav.innerHTML = [...NAV, dashLink].map(([h, t, ic]) =>
-    `<a class="nav-link${h === active ? ' active' : ''}" href="${h}">${ICONS[ic]}<span>${t}</span></a>`).join('');
+  const link = ([h, t, ic]) =>
+    `<a class="nav-link${h === active ? ' active' : ''}" href="${h}" onclick="closeNav()">${ICONS[ic]}<span>${t}</span></a>`;
+  nav.innerHTML = NAV_SECTIONS.map((s2) =>
+    (s2.t ? `<div class="nav-sec-t">${s2.t}</div>` : '') + s2.links.map(link).join('')
+  ).join('') + `<div class="nav-sec-t">الحساب</div>` + link(dashLink);
   const bn = document.getElementById('bottomnav');
-  const newsLink = NAV.find((n) => n[0] === '#/news');
-  const econLink = NAV.find((n) => n[0] === '#/economy');
-  const mktLink = NAV.find((n) => n[0] === '#/market');
-  bn.innerHTML = [NAV[0], newsLink, econLink, mktLink, NAV[1], NAV[2], dashLink].map(([h, , ic]) =>
-    `<a class="${h === active ? 'active' : ''}" href="${h}">${ICONS[ic]}</a>`).join('');
+  const L = (h) => NAV_SECTIONS.flatMap((s2) => s2.links).find((n) => n[0] === h);
+  bn.innerHTML = [L('#/'), L('#/news'), L('#/economy'), L('#/market'), L('#/dispatches'), L('#/messages'), dashLink]
+    .map(([h, , ic]) => `<a class="${h === active ? 'active' : ''}" href="${h}">${ICONS[ic]}</a>`).join('');
   refreshNotifBadge();
   if (me) {
     api('GET', '/conversations').then((list) => {
@@ -311,7 +317,8 @@ function bindFeed() {
     location.hash = '#/article/' + c.dataset.id;
   });
 }
-const thead = (title, tabs) => `<div class="thead"><div class="thead-title">${title}</div>
+const MENU_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>';
+const thead = (title, tabs) => `<div class="thead"><button class="menu-btn" onclick="document.body.classList.toggle('nav-open')" aria-label="القائمة">${MENU_SVG}</button><div class="thead-title">${title}</div>
   ${tabs ? `<div class="ttabs">${tabs}</div>` : ''}
   <a href="#/notifications" class="nbell" id="nbell" title="الإشعارات">${ICONS.bell}<span class="unread" id="nbell-n" style="display:none"></span></a></div>`;
 
@@ -732,8 +739,8 @@ function initGlobe3D(cv, rows, mstates) {
   });
   // علامات إعلانات المطورين: حالة حرب / طوارئ (حتى للدول الهادئة)
   (mstates || []).forEach((s) => {
-    if ((s.status === 'war' || s.status === 'emergency') && s.lat != null && s.lon != null) {
-      const col = s.status === 'war' ? 0xf4212e : 0xff9f0a;
+    if ((s.status === 'war' || s.status === 'emergency' || s.status === 'revolt') && s.lat != null && s.lon != null) {
+      const col = s.status === 'emergency' ? 0xff9f0a : 0xf4212e;
       const ring = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: col, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.95 }));
       ring.position.copy(latLonToVec3(s.lat, s.lon, 1.006));
       ring.scale.setScalar(0.42);
@@ -873,10 +880,10 @@ function renderBriefs(rows) {
 }
 
 // ---------- إعلانات المطورين: حالات الحرب والطوارئ ----------
-const MAP_ST_AR = { war: 'حالة حرب', emergency: 'حالة طوارئ', peace: 'سلم معلن' };
+const MAP_ST_AR = { war: 'حالة حرب', emergency: 'حالة طوارئ', peace: 'سلم معلن', revolt: 'ثورة شعبية' };
 function renderDeclarations(mstates) {
   const el = document.getElementById('wdecl'); if (!el) return;
-  const order = { war: 0, emergency: 1, peace: 2 };
+  const order = { war: 0, emergency: 1, revolt: 2, peace: 3 };
   const list = (mstates || []).filter((s) => s.status).sort((a, b) => order[a.status] - order[b.status]);
   if (!list.length) { el.innerHTML = '<div class="empty">لا توجد إعلانات حالية.</div>'; return; }
   el.innerHTML = '<div class="wdecl-list">' + list.map((s) => {
@@ -961,6 +968,13 @@ async function vArmy(code) {
 // ---------- إدارة الجيوش (المطورون فقط) ----------
 // ======== الاقتصاد والسكان 1900 ========
 const fmtPop = (n) => n == null ? '—' : Number(n).toLocaleString('en-US');
+const fmtBig = (n) => {
+  n = Number(n) || 0;
+  if (n >= 1e9) return (n / 1e9).toFixed(1) + ' مليار';
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + ' مليون';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + ' ألف';
+  return String(Math.round(n));
+};
 const fmtGdp = (n) => n == null ? '—' : (Number(n) >= 1000 ? (Number(n) / 1000).toFixed(1) + ' مليار' : Number(n).toFixed(0) + ' مليون');
 const fmtRate = (n) => {
   if (n == null) return '—';
@@ -1044,15 +1058,30 @@ async function vEconomyDetail(code) {
   const coBadge = (o) => `<span class="co-badge ${o.ctype}">${o.ctype === 'international' ? 'دولية' : 'وطنية'}</span>`
     + (o.status === 'pending' ? ' <span class="co-badge pend">بانتظار الموافقة</span>'
       : o.status === 'rejected' ? ' <span class="co-badge rej">مرفوضة</span>' : '');
+  window._cos = window._cos || {};
+  cos.forEach((o) => { window._cos[o.id] = o; });
+  abroad.forEach((o) => { window._cos[o.id] = o; });
+  const rkOpts = (sel) => `<option value="">عامة (بدون استخراج)</option>` +
+    (d.resource_kinds || []).map((r) => `<option value="${r.kind}"${sel === r.kind ? ' selected' : ''}>استخراج ${esc(r.name)} (${r.rate} ${esc(r.unit)}/عامل/شهر)</option>`).join('');
   const coCard = (o) => {
     const hc = o.host_country && o.host_country !== code ? ` · تستضيفها ${esc(countryOf(o.host_country).name)}` : '';
+    const canEdit = dev || o.owner_id === me.id;
+    const resLine = o.resource_kind
+      ? `<span>التخصص: استخراج ${esc(o.resource_name)} · العمال: <b>${fmtN(o.workers)}</b></span>`
+      : '<span class="hint">غير متخصصة في استخراج الموارد</span>';
     return `<div class="wpn-card"><div class="wpn-tx"><b>${esc(o.name)}</b> ${coBadge(o)}
       <span>القطاع: ${esc(o.sector)}${hc}</span>
       <span>المقر: ${esc(o.city || '—')}</span>
+      ${resLine}
       <span>رأس المال: ${o.capital == null ? '—' : fmtRate(o.capital) + ' مليون ' + esc((e && o.host_country === code && e.currency_code) ? e.currency_code : 'عملة محلية')} ${o.capital_usd != null ? `(~${fmtRate(o.capital_usd)} مليون $)` : ''}</span>
       <span class="hint">المالك: ${esc(o.owner_name || '—')}</span>
       ${o.description ? `<span class="hint">${esc(o.description)}</span>` : ''}
-      ${(dev || o.owner_id === me.id) ? `<span class="me-btns"><button class="btn ghost sm" onclick="coDel(${o.id})">حذف</button></span>` : ''}
+      ${canEdit && o.status === 'approved' ? `<span class="me-btns co-edit">
+        <select id="rk-${o.id}" title="تخصص الاستخراج">${rkOpts(o.resource_kind)}</select>
+        <input id="wk-${o.id}" type="number" min="0" max="20000" value="${o.workers}" dir="ltr" title="عدد العمال" placeholder="العمال">
+        <button class="btn ghost sm" onclick="coSpecSave(${o.id})">حفظ</button>
+        ${o.resource_kind && o.workers > 0 ? `<button class="btn sm" onclick="coCollect(${o.id})">جمع الإنتاج</button>` : ''}
+        <button class="btn ghost sm" onclick="coDel(${o.id})">حذف</button></span>` : ''}
     </div></div>`;
   };
   const hostCountries = COUNTRIES.filter((x) => x.code !== code && (g.cities[x.code] || []).length);
@@ -1061,9 +1090,32 @@ async function vEconomyDetail(code) {
       <div><h2>اقتصاد ${esc(c.name)} — 1900</h2>
       <p class="army-count">${fmtPop(e ? e.population : null)} نسمة ${e ? confBadge(e.pop_confidence) : ''}</p>
       <p class="hint">الناتج المحلي: ${fmtGdp(e ? e.gdp_m_intl : null)} دولار دولي (1990) ${e && e.gdp_per_capita ? `· للفرد: ${fmtPop(e.gdp_per_capita)}` : ''} ${e ? confBadge(e.gdp_confidence) : ''}</p>
+      ${d.unemployment && d.unemployment.rate != null ? `<p class="hint">نسبة البطالة: <b>${d.unemployment.rate}%</b> — قوة العمل التقديرية ${fmtPop(d.unemployment.labor_force)} · يعمل في الشركات ${fmtPop(d.unemployment.employed)} <span class="dim">(كل عامل لعبة = 100 عامل)</span></p>` : ''}
       ${e && e.pop_source ? `<p class="hint"><a href="${esc(e.pop_source)}" target="_blank" rel="noopener" class="wpn-src">مصدر السكان</a>${e.gdp_source ? ` · <a href="${esc(e.gdp_source)}" target="_blank" rel="noopener" class="wpn-src">مصدر الناتج</a>` : ''}</p>` : ''}</div></div>
     <div class="war-sec"><div class="war-sec-t">${ICONS.coin} العملة الوطنية</div>${rateBox}</div>
     <div class="war-sec"><div class="war-sec-t">${ICONS.coin} السيولة المتوفرة</div>${liqBox}</div>
+    ${d.revolt_active ? `<div class="revolt-banner">ثورة شعبية — عصيان مدني! الشعب غاضب من الضرائب المرتفعة. اخفض النسبة إلى 30% أو أقل لإنهاء الثورة واستئناف الجباية.</div>` : ''}
+    ${mine ? `<div class="war-sec"><div class="war-sec-t">الضرائب</div>
+      <div class="map-ed">
+        <div class="field"><label>نسبة الضريبة الحالية</label><div class="stat-v" style="font-size:20px">${d.tax_rate}%</div></div>
+        <div class="field"><label>تحديد النسبة (0 – 100)</label><input id="tax-rate" type="number" min="0" max="100" step="any" value="${d.tax_rate}" dir="ltr"></div>
+      </div>
+      <div class="me-btns" style="margin-top:8px">
+        <button class="btn sm" onclick="taxSave('${code}')">حفظ النسبة</button>
+        <button class="btn sm" ${d.can_collect ? '' : 'disabled'} onclick="taxCollect('${code}')">جباية شهرية (+${fmtRate(d.collect_amount)} مليون $)</button>
+      </div>
+      <p class="hint">الجباية مرة واحدة كل شهر لعبة (ساعتان حقيقيتان). المبلغ = الناتج السنوي × النسبة ÷ 12. أثناء الثورة تتوقف الجباية.</p>
+    </div>` : `<div class="war-sec"><div class="war-sec-t">الضرائب</div><p class="hint">نسبة الضريبة الحالية: <b>${d.tax_rate}%</b></p></div>`}
+    <div class="war-sec"><div class="war-sec-t">الموارد الطبيعية والاحتياطيات</div>
+      <p class="hint">الاحتياطيات تقديرات لعب وليست أرقامًا موثقة. لا تستفيد الدولة من أي مورد إلا عبر شركة متخصصة في استخراجه مع عدد عمال — وكلما زاد العمال زاد الإنتاج الشهري.</p>
+      <table class="res-table"><tr><th>المورد</th><th>الاحتياطي التقديري</th><th>المخزون المنتَج</th></tr>
+      ${(d.resources || []).map((r) => `<tr><td>${esc(r.name)}</td><td>${r.reserves ? fmtBig(r.reserves) + ' ' + esc(r.unit) : '—'}</td><td><b>${fmtBig(r.stock)}</b> ${esc(r.unit)}</td></tr>`).join('')}
+      </table></div>
+    ${(d.liquidity_log || []).length ? `<div class="war-sec"><div class="war-sec-t">سجل السيولة</div>
+      <div class="liq-log">${d.liquidity_log.map((x) => `
+        <div class="liq-row"><span class="liq-amt ${x.amount >= 0 ? 'pos' : 'neg'}">${x.amount >= 0 ? '+' : ''}${fmtRate(x.amount)}</span>
+        <span class="liq-rs">${esc(x.reason || '')}${x.actor ? ` <span class="hint">(${esc(x.actor)})</span>` : ''}</span>
+        <time>${new Date(x.created_at).toLocaleDateString('ar-EG')}</time></div>`).join('')}</div></div>` : ''}
     ${pend.length ? `<div class="war-sec"><div class="war-sec-t">${ICONS.alert} طلبات شركات دولية بانتظار قرارك (${pend.length})</div>
       <div class="wpn-grid">` + pend.map((o) => `
         <div class="wpn-card"><div class="wpn-tx"><b>${esc(o.name)}</b> <span class="co-badge">دولية</span>
@@ -1074,7 +1126,7 @@ async function vEconomyDetail(code) {
           <span class="me-btns"><button class="btn sm" onclick="coApprove(${o.id})">موافقة</button>
           <button class="btn ghost sm" onclick="coReject(${o.id})">رفض</button></span>
         </div></div>`).join('') + '</div></div>' : ''}
-    <div class="war-sec"><div class="war-sec-t">🏭 الشركات العاملة في ${esc(c.name)} (${cos.filter((o) => o.status === 'approved').length})</div>
+    <div class="war-sec" id="co-list"><div class="war-sec-t">🏭 الشركات العاملة في ${esc(c.name)} (${cos.filter((o) => o.status === 'approved').length})</div>
       ${cos.length ? `<div class="wpn-grid">` + cos.map(coCard).join('') + '</div>'
         : '<div class="empty">لا توجد شركات مسجلة بعد — كن أول من يؤسس شركة هنا.</div>'}
     </div>
@@ -1090,7 +1142,14 @@ async function vEconomyDetail(code) {
         </select></div>
         <div class="field" id="co-host-wrap" style="display:none"><label>الدولة المضيفة</label>
           <select id="co-host" onchange="coHostChanged()">${hostCountries.map((x) => `<option value="${x.code}">${x.flag} ${esc(x.name)}</option>`).join('')}</select></div>
-        <div class="field"><label>المدينة / المقر</label><select id="co-city"></select></div>
+        <div class="field"><label>المدينة / المقر — ابحث واختر من القائمة</label>
+          <input id="co-city" list="dl-city" placeholder="اكتب اسم المدينة للبحث..." autocomplete="off">
+          <datalist id="dl-city"></datalist></div>
+        <div class="field"><label>تخصص استخراج الموارد</label><select id="co-res">
+          <option value="">عامة (بدون استخراج)</option>
+          ${(d.resource_kinds || []).map((r) => `<option value="${r.kind}">استخراج ${esc(r.name)} — ${r.rate} ${esc(r.unit)}/عامل/شهر</option>`).join('')}
+        </select></div>
+        <div class="field"><label>عدد العمال (0 – 20000 · كل عامل = 100 عامل فعلي)</label><input id="co-workers" type="number" min="0" max="20000" value="0" dir="ltr"></div>
         <div class="field"><label id="co-cap-label">رأس المال (بملايين العملة المحلية)</label><input id="co-capital" type="number" min="0" dir="ltr"></div>
         <div class="field" style="grid-column:1/-1"><label>وصف النشاط</label><input id="co-desc" placeholder="ماذا تنتج الشركة؟"></div>
         <p class="hint" id="co-note" style="grid-column:1/-1"></p>
@@ -1128,10 +1187,10 @@ function coHostChanged(code) {
   const hostCC = coHostCC(code || me.country_code);
   const g = (GEO && GEO.cities) || {};
   const list = g[hostCC] || [];
-  const sel = document.getElementById('co-city');
-  sel.innerHTML = list.length
-    ? list.map((x) => `<option>${esc(x)}</option>`).join('')
-    : '<option value="">—</option>';
+  const dl = document.getElementById('dl-city');
+  if (dl) dl.innerHTML = list.map((x) => `<option value="${esc(x)}">`).join('');
+  const inp = document.getElementById('co-city');
+  if (inp) inp.placeholder = list.length ? `ابحث بين ${list.length} مدينة...` : 'اكتب اسم المدينة...';
   const isIntl = t.value === 'international';
   document.getElementById('co-cap-label').textContent =
     `رأس المال (بملايين عملة ${countryOf(hostCC).name})`;
@@ -1148,17 +1207,54 @@ async function coCreate(code) {
     host_country: ctype === 'international' ? document.getElementById('co-host').value : undefined,
     name: document.getElementById('co-name').value.trim(),
     sector: document.getElementById('co-sector').value,
-    city: document.getElementById('co-city').value,
+    city: document.getElementById('co-city').value.trim(),
+    resource_kind: document.getElementById('co-res').value || null,
+    workers: document.getElementById('co-workers').value || 0,
     capital: document.getElementById('co-capital').value,
     description: document.getElementById('co-desc').value.trim(),
   };
   if (!body.name) return toast('اكتب اسم الشركة أولاً');
-  if (!body.city) return toast('اختر مدينة المقر');
+  if (!body.city) return toast('اختر مدينة المقر من القائمة');
   try {
     const r = await api('POST', '/companies', body);
     toast(r.status === 'pending' ? 'تم إرسال الطلب للدولة المضيفة — بانتظار موافقتها' : 'تم تأسيس الشركة 🏭');
-    vEconomyDetail(code);
+    await vEconomyDetail(code);
+    const el = document.getElementById('co-list');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (e) { toast(e.message || 'فشل التأسيس'); }
+}
+async function coSpecSave(id) {
+  const o = (window._cos || {})[id];
+  if (!o) return toast('تعذر التحميل');
+  try {
+    await api('PUT', '/companies/' + id, {
+      name: o.name, sector: o.sector, city: o.city, description: o.description || '',
+      resource_kind: document.getElementById('rk-' + id).value || null,
+      workers: document.getElementById('wk-' + id).value || 0,
+    });
+    toast('تم حفظ التخصص والعمال'); route();
+  } catch (e) { toast(e.message || 'فشل الحفظ'); }
+}
+async function coCollect(id) {
+  try {
+    const r = await api('POST', '/companies/' + id + '/collect');
+    toast(`تم جمع الإنتاج: ${Number(r.amount).toLocaleString('en-US')} ${r.unit} ${r.resource}`);
+    route();
+  } catch (e) { toast(e.message || 'فشل الجمع'); }
+}
+async function taxSave(code) {
+  const v = document.getElementById('tax-rate').value;
+  try {
+    await api('PUT', '/economy/' + code, { tax_rate: v });
+    toast('تم حفظ نسبة الضريبة'); vEconomyDetail(code);
+  } catch (e) { toast(e.message || 'فشل الحفظ'); }
+}
+async function taxCollect(code) {
+  try {
+    const r = await api('POST', '/economy/' + code + '/collect-taxes');
+    toast(`تمت الجباية: +${fmtRate(r.amount)} مليون $ لسيولة الدولة`);
+    vEconomyDetail(code);
+  } catch (e) { toast(e.message || 'فشلت الجباية'); }
 }
 async function coApprove(id) {
   try { await api('POST', '/companies/' + id + '/approve'); toast('تمت الموافقة على الشركة'); route(); }
@@ -1190,8 +1286,8 @@ let mktTab = 'market';
 async function vMarket() {
   if (!me) { location.hash = '#/login'; return; }
   const g = await geoData();
-  app.innerHTML = thead('سوق السلاح', [
-    ['market', 'السوق'], ['sell', 'بِع سلاحك'], ['orders', 'طلباتي'],
+  app.innerHTML = thead('السوق العام', [
+    ['market', 'السوق'], ['sell', 'بِع شيئًا'], ['orders', 'طلباتي'],
   ].map(([k, t]) => `<button class="ttab${mktTab === k ? ' active' : ''}" onclick="mktTab='${k}';vMarket()">${t}</button>`).join(''))
     + '<div id="mktbody"><div class="spin"></div></div>';
   try {
@@ -1205,57 +1301,79 @@ async function renderMktList(g) {
   const list = d.listings || [];
   const myCC = me.country_code;
   document.getElementById('mktbody').innerHTML = `
-    <p class="hint" style="margin:0 0 12px">كل لاعب يبيع أسلحة دولته بالسعر الذي يريده. مدة التسليم بزمن اللعبة: <b>5-7 أيام</b> داخل نفس القارة و<b>15 يومًا</b> بين قارتين مختلفتين.</p>
+    <p class="hint" style="margin:0 0 12px">بِع أي شيء تملكه دولتك — أسلحة من الترسانة أو موارد منتَجة (نفط، غاز، حديد...) — بالسعر الذي تريده. مدة التسليم بزمن اللعبة: <b>5-7 أيام</b> داخل نفس القارة و<b>15 يومًا</b> بين قارتين مختلفتين.</p>
     ${list.length ? '<div class="wpn-grid">' + list.map((l) => {
       const sc = countryOf(l.seller_country);
       const own = l.seller_country === myCC;
+      const isRes = l.kind === 'resource';
+      const sub = isRes ? 'مورد طبيعي' : `${esc(l.weapon_class || '')} ${esc(l.weapon_wtype || '')} ${esc(l.weapon_model || '')}`;
       return `<div class="wpn-card"><div class="wpn-tx">
-        ${l.weapon_image ? `<img src="${esc(l.weapon_image)}" class="wpn-img" loading="lazy" alt="">` : ''}
-        <b>${esc(l.weapon_name || 'سلاح')}</b>
-        <span>${esc(l.weapon_class || '')} ${esc(l.weapon_wtype || '')} ${esc(l.weapon_model || '')}</span>
+        ${!isRes && l.weapon_image ? `<img src="${esc(l.weapon_image)}" class="wpn-img" loading="lazy" alt="">` : ''}
+        <b>${esc(l.title || 'سلعة')}</b> <span class="co-badge ${isRes ? 'res' : ''}">${isRes ? 'مورد' : 'سلاح'}</span>
+        ${sub.trim() ? `<span>${sub}</span>` : ''}
         <span>البائع: ${esc(l.seller_name || '—')} ${sc.flag} ${esc(sc.name)}${own ? ' (عرضك)' : ''}</span>
-        <span>الكمية: ${l.qty} · السعر: <b>${fmtRate(l.price_unit_m_usd)} مليون $</b> للقطعة</span>
+        <span>الكمية: ${fmtBig(l.qty)} ${esc(l.unit || '')} · السعر: <b>${fmtRate(l.price_unit_m_usd)} مليون $</b> للوحدة</span>
         <span class="hint">${deliveryLabel(myCC, 0, l.seller_continent)}${l.seller_continent ? ` (${CONT_AR[l.seller_continent] || l.seller_continent})` : ''}</span>
         ${own ? `<span class="me-btns"><button class="btn ghost sm" onclick="mktCancel(${l.id})">إلغاء العرض</button></span>`
           : `<span class="me-btns"><input id="buy-qty-${l.id}" type="number" min="1" max="${l.qty}" value="1" style="width:70px" dir="ltr">
              <button class="btn sm" onclick="mktBuy(${l.id})">شراء</button></span>`}
       </div></div>`;
-    }).join('') + '</div>' : '<div class="empty">لا توجد عروض نشطة حاليًا — كن أول من يعرض سلاحًا للبيع.</div>'}`;
+    }).join('') + '</div>' : '<div class="empty">لا توجد عروض نشطة حاليًا — كن أول من يعرض شيئًا للبيع.</div>'}`;
 }
+let mktSellKind = 'weapon';
 async function renderMktSell() {
-  let weapons = [];
+  let weapons = [], stocks = [];
   try {
     const d = await api('GET', '/armies/' + me.country_code);
     weapons = (d.weapons || []).filter((w) => w.id);
   } catch (e) {}
+  try {
+    const e2 = await api('GET', '/economy/' + me.country_code);
+    stocks = (e2.resources || []).filter((r) => r.stock > 0);
+  } catch (e) {}
+  const kindBtns = ['weapon', 'resource'].map((k) =>
+    `<button class="ttab${mktSellKind === k ? ' active' : ''}" onclick="mktSellKind='${k}';renderMktSell()">${k === 'weapon' ? 'سلاح' : 'مورد'}</button>`).join('');
   document.getElementById('mktbody').innerHTML = `
-    <div class="war-sec"><div class="war-sec-t">${ICONS.swords} عرض سلاح للبيع</div>
-      ${weapons.length ? `<div class="map-ed">
-        <div class="field" style="grid-column:1/-1"><label>السلاح (من ترسانة دولتك)</label>
-          <select id="mkt-weapon">${weapons.map((w) => `<option value="${w.id}">${esc(w.name)}${w.quantity != null ? ` — الكمية: ${w.quantity}` : ''}</option>`).join('')}</select></div>
-        <div class="field"><label>الكمية</label><input id="mkt-qty" type="number" min="1" value="1" dir="ltr"></div>
-        <div class="field"><label>السعر للقطعة (مليون دولار)</label><input id="mkt-price" type="number" min="0" step="any" dir="ltr" placeholder="حدد السعر الذي تريده"></div>
-        <p class="hint" style="grid-column:1/-1">السعر حر تمامًا — بعه بالثمن الذي تريده. عند الشراء يُخصم المبلغ من سيولة دولة المشتري ويُضاف لسيولة دولتك.</p>
-        <div class="me-btns"><button class="btn" onclick="mktList()">نشر العرض</button></div>
-      </div>` : '<div class="empty">لا توجد أسلحة في ترسانتك لعرضها.</div>'}
+    <div class="war-sec"><div class="war-sec-t">${ICONS.swords} عرض للبيع</div>
+      <div class="ttabs" style="margin-bottom:10px">${kindBtns}</div>
+      ${mktSellKind === 'weapon'
+        ? (weapons.length ? `<div class="map-ed">
+            <div class="field" style="grid-column:1/-1"><label>السلاح (من ترسانة دولتك)</label>
+              <select id="mkt-weapon">${weapons.map((w) => `<option value="${w.id}">${esc(w.name)}${w.quantity != null ? ` — الكمية: ${w.quantity}` : ''}</option>`).join('')}</select></div>
+            <div class="field"><label>الكمية</label><input id="mkt-qty" type="number" min="1" value="1" dir="ltr"></div>
+            <div class="field"><label>السعر للقطعة (مليون دولار)</label><input id="mkt-price" type="number" min="0" step="any" dir="ltr" placeholder="حدد السعر الذي تريده"></div>
+          </div>` : '<div class="empty">لا توجد أسلحة في ترسانتك لعرضها.</div>')
+        : (stocks.length ? `<div class="map-ed">
+            <div class="field" style="grid-column:1/-1"><label>المورد (من مخزون دولتك المنتَج)</label>
+              <select id="mkt-resource">${stocks.map((r) => `<option value="${r.kind}">${esc(r.name)} — المخزون: ${fmtBig(r.stock)} ${esc(r.unit)}</option>`).join('')}</select></div>
+            <div class="field"><label>الكمية</label><input id="mkt-qty" type="number" min="1" value="1" dir="ltr"></div>
+            <div class="field"><label>السعر للوحدة (مليون دولار)</label><input id="mkt-price" type="number" min="0" step="any" dir="ltr" placeholder="حدد السعر الذي تريده"></div>
+          </div>` : '<div class="empty">لا يوجد مخزون موارد — أنتج عبر شركات متخصصة أولًا.</div>')}
+      <p class="hint">السعر حر تمامًا. عند الشراء يُخصم المبلغ من سيولة دولة المشتري ويُضاف لسيولة دولتك، وتُسجَّل الحركة في سجل السيولة.</p>
+      <div class="me-btns"><button class="btn" onclick="mktList()">نشر العرض</button></div>
     </div>
     <div class="war-sec"><div class="war-sec-t">عروضي النشطة</div><div id="mymkt"><div class="spin"></div></div></div>`;
   try {
     const d = await api('GET', '/market');
     const mine = (d.listings || []).filter((l) => l.seller_country === me.country_code);
     document.getElementById('mymkt').innerHTML = mine.length ? '<div class="wpn-grid">' + mine.map((l) => `
-      <div class="wpn-card"><div class="wpn-tx"><b>${esc(l.weapon_name || 'سلاح')}</b>
-        <span>الكمية: ${l.qty} · السعر: ${fmtRate(l.price_unit_m_usd)} مليون $ للقطعة</span>
+      <div class="wpn-card"><div class="wpn-tx"><b>${esc(l.title || 'سلعة')}</b> <span class="co-badge ${l.kind === 'resource' ? 'res' : ''}">${l.kind === 'resource' ? 'مورد' : 'سلاح'}</span>
+        <span>الكمية: ${fmtBig(l.qty)} ${esc(l.unit || '')} · السعر: ${fmtRate(l.price_unit_m_usd)} مليون $ للوحدة</span>
         <span class="me-btns"><button class="btn ghost sm" onclick="mktCancel(${l.id})">إلغاء العرض</button></span>
       </div></div>`).join('') + '</div>' : '<div class="empty">لا عروض نشطة لك.</div>';
   } catch (e) { document.getElementById('mymkt').innerHTML = '<div class="empty">تعذر التحميل.</div>'; }
 }
 async function mktList() {
-  const body = {
-    weapon_id: document.getElementById('mkt-weapon').value,
-    qty: document.getElementById('mkt-qty').value,
-    price_unit_m_usd: document.getElementById('mkt-price').value,
-  };
+  const body = { qty: document.getElementById('mkt-qty').value, price_unit_m_usd: document.getElementById('mkt-price').value };
+  if (mktSellKind === 'resource') {
+    const rs = document.getElementById('mkt-resource');
+    if (!rs) return toast('لا يوجد مخزون للبيع');
+    body.kind = 'resource'; body.resource = rs.value;
+  } else {
+    const ws = document.getElementById('mkt-weapon');
+    if (!ws) return toast('لا توجد أسلحة للبيع');
+    body.kind = 'weapon'; body.weapon_id = ws.value;
+  }
   try { await api('POST', '/market/listings', body); toast('تم نشر العرض'); vMarket(); }
   catch (e) { toast(e.message || 'فشل النشر'); }
 }
@@ -1286,11 +1404,12 @@ async function renderMktOrders() {
     const left = o.deliver_at - Date.now();
     const st = o.status === 'delivered' ? '<span class="co-badge">تم التسليم</span>'
       : `<span class="co-badge pend">في الطريق — ${o.game_days} أيام لعبة (${fmtLeft(left)} حقيقية)</span>`;
+    const isRes = o.kind === 'resource';
     return `<div class="wpn-card"><div class="wpn-tx">
-      ${o.weapon_image ? `<img src="${esc(o.weapon_image)}" class="wpn-img" loading="lazy" alt="">` : ''}
-      <b>${esc(o.weapon_name || 'سلاح')}</b> ${st}
+      ${!isRes && o.weapon_image ? `<img src="${esc(o.weapon_image)}" class="wpn-img" loading="lazy" alt="">` : ''}
+      <b>${esc(o.title || o.weapon_name || 'سلعة')}</b> <span class="co-badge ${isRes ? 'res' : ''}">${isRes ? 'مورد' : 'سلاح'}</span> ${st}
       <span>${o.mine_bought ? 'اشتريت من' : 'بعت إلى'}: ${esc(o.mine_bought ? o.seller_name : o.buyer_name || '—')} ${countryOf(o.mine_bought ? o.seller_country : o.buyer_country).flag}</span>
-      <span>الكمية: ${o.qty} · الإجمالي: ${fmtRate(o.total_m_usd)} مليون $</span>
+      <span>الكمية: ${fmtBig(o.qty)} ${esc(o.unit || '')} · الإجمالي: ${fmtRate(o.total_m_usd)} مليون $</span>
     </div></div>`;
   }).join('') + '</div>' : '<div class="empty">لا توجد طلبات بعد.</div>';
 }
