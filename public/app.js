@@ -492,7 +492,7 @@ async function vNews() {
   let rows = [], mstates = [];
   try { const d = await api('GET', '/conflict'); rows = d.rows || []; }
   catch (e) { /* يبقى فارغًا */ }
-  try { const m = await api('GET', '/api/map-states'); mstates = m.states || []; }
+  try { const m = await api('GET', '/map-states'); mstates = m.states || []; }
   catch (e) { /* يبقى فارغًا */ }
   initGlobe(rows, mstates);
   renderWarTable(rows, mstates);
@@ -898,13 +898,13 @@ async function mapSave() {
     label: val('me-label') || null,
     borders_geojson: val('me-geotext') || null,
   };
-  try { await api('POST', '/api/map-states', body); alert('حُفظ تعديل الخريطة ✓'); vNews(); }
+  try { await api('POST', '/map-states', body); alert('حُفظ تعديل الخريطة ✓'); vNews(); }
   catch (e) { alert(e.message); }
 }
 async function mapDelete() {
   const code = val('me-country');
   if (!confirm('حذف كل تعديلات هذه الدولة من الخريطة؟')) return;
-  try { await api('DELETE', '/api/map-states/' + code); vNews(); }
+  try { await api('DELETE', '/map-states/' + code); vNews(); }
   catch (e) { alert(e.message); }
 }
 async function mapEditGeo() {
