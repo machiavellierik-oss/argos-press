@@ -2042,6 +2042,12 @@ async function renderAdminTab(body) {
     <div class="field"><label>كلمة سر جديدة لحساب المطورين</label>
       <input id="devpass" type="password" placeholder="6 أحرف على الأقل" autocomplete="new-password"></div>
     <button class="btn" style="width:auto;padding:10px 32px" onclick="setDevPassword()">تعيين كلمة السر</button>
+    <div class="sec-h" style="margin-top:18px">صيانة المحاكاة</div>
+    <p class="hint">أدوات خطيرة — للمطورين فقط. تصفير الشركات يحذف كل الشركات نهائيًا ولا رجعة فيه.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn danger" style="width:auto;padding:10px 20px" onclick="wipeCompanies()">${ICONS.trash} تصفير جميع الشركات</button>
+      <button class="btn" style="width:auto;padding:10px 20px" onclick="anchorClock()">↺ الساعة: 1900-01-01 منذ 6 مساء GMT اليوم</button>
+    </div>
     <div class="sec-h" style="margin-top:18px">المستخدمون (${users.length})</div>
     <div>` + (users.map((u) => {
       const c = countryOf(u.country_code);
@@ -2069,6 +2075,21 @@ async function setDevPassword() {
     await api('POST', '/admin/dev-password', { password: p });
     msg('تم تعيين كلمة سر حساب المطورين ✓', true);
     document.getElementById('devpass').value = '';
+  } catch (e) { msg(e.message, false); }
+}
+async function wipeCompanies() {
+  if (!confirm('تحذير: سيتم حذف جميع الشركات نهائيًا. متأكد؟')) return;
+  if (!confirm('تأكيد أخير — لا رجعة فيه!')) return;
+  try {
+    const r = await api('POST', '/api/admin/wipe-companies');
+    msg('تم تصفير الشركات ✓ — حُذفت ' + r.deleted + ' شركة', true);
+  } catch (e) { msg(e.message, false); }
+}
+async function anchorClock() {
+  if (!confirm('ضبط بداية المحاكاة: 1 يناير 1900 منذ الساعة 6 مساء بتوقيت غرينتش اليوم (الأحد 27 سبتمبر)؟')) return;
+  try {
+    await api('POST', '/api/clock/reset', { start_at: '2026-09-27T18:00:00.000Z' });
+    msg('تم ✓ — تبدأ المحاكاة من 6 مساء GMT اليوم وتنتقل تلقائيًا', true);
   } catch (e) { msg(e.message, false); }
 }
 async function banUser(id, name) {

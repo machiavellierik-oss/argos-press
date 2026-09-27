@@ -597,12 +597,23 @@ app.post('/api/clock/stop', ah(auth), requireDeveloper, ah(async (req, res) => {
   res.json({ ok: true, running: false });
 }));
 // إعادة التعيين: يعود زمن اللعبة إلى الصفر (يناير 1900) ويعمل من جديد
+// يقبل start_at (ISO) اختياريًا لتثبيت بداية اللعبة على لحظة محددة — حتى لو كانت في المستقبل
 app.post('/api/clock/reset', ah(auth), requireDeveloper, ah(async (req, res) => {
-  const now = Date.now();
-  await q('UPDATE game_clock SET started_at=$1, running=1, updated_by=$2 WHERE id=1', [now, req.user.id]);
+  let startAt = Date.now();
+  if (req.body && req.body.start_at) {
+    const t = Date.parse(req.body.start_at);
+    if (!Number.isFinite(t)) return res.status(400).json({ error: 'تاريخ البداية غير صالح' });
+    startAt = t;
+  }
+  await q('UPDATE game_clock SET started_at=$1, running=1, updated_by=$2 WHERE id=1', [startAt, req.user.id]);
   await q('UPDATE companies SET last_collect=NULL');
   await q('UPDATE country_economy SET last_tax_collect=NULL');
-  res.json({ ok: true, running: true, started_at: now, game: gameDateOf(now, now) });
+  res.json({ ok: true, running: true, started_at: startAt, game: gameDateOf(startAt, Date.now()) });
+}));
+// تصفير جميع الشركات — المطورون فقط (قرار إداري لا رجعة فيه)
+app.post('/api/admin/wipe-companies', ah(auth), requireDeveloper, ah(async (req, res) => {
+  const r = await q('DELETE FROM companies');
+  res.json({ ok: true, deleted: r.rowCount });
 }));
 
 // ---------- خريطة غرفة الحرب: تعديلات المطورين (لون/حالة/حدود) ----------
@@ -1290,7 +1301,11 @@ app.post('/api/companies/:id/collect', ah(auth), ah(async (req, res) => {
   const workers = Number(row.workers) || 0;
   if (workers <= 0) return res.status(400).json({ error: 'حدد عدد العمال أولًا' });
   const nowG = await gameNow();
-  if (!canCollectNow(nowG, row.last_collect))
+  const monthStart = gameMonthIdx(nowG) * GAME_MONTH_MS; // بداية شهر اللعبة الحالي بالمللي
+  // حجز ذري لشهر اللعبة: أول طلب فقط ينجح — يمنع غليتش الأموال عند الضغط المزدوج
+  const claim = await q('UPDATE companies SET last_collect=$1 WHERE id=$2 AND (last_collect IS NULL OR last_collect < $3)',
+    [nowG, row.id, monthStart]);
+  if (!claim.rowCount)
     return res.status(400).json({ error: 'تم جمع إنتاج هذا الشهر — عُد الشهر القادم (شهر لعبة)' });
   const reserveTotal = Number((RESERVES[row.host_country] || {})[row.resource_kind]) || 0;
   const exRow = await one('SELECT extracted FROM resource_extracted WHERE country_code=$1 AND resource=$2', [row.host_country, row.resource_kind]);
@@ -1305,7 +1320,6 @@ app.post('/api/companies/:id/collect', ah(auth), ah(async (req, res) => {
     [row.host_country, row.resource_kind, amount]);
   else await q('INSERT INTO resource_extracted (country_code,resource,extracted) VALUES ($1,$2,$3)',
     [row.host_country, row.resource_kind, amount]);
-  await q('UPDATE companies SET last_collect=$2 WHERE id=$1', [row.id, nowG]);
   await logLiq(row.host_country, 0, `إنتاج ${RES_AR[row.resource_kind]}: ${amount.toLocaleString('en-US')} ${RES_UNIT[row.resource_kind]} من «${row.name}» (${workers.toLocaleString('en-US')} عامل)`, req.user.username);
   res.json({ ok: true, amount, unit: RES_UNIT[row.resource_kind], resource: RES_AR[row.resource_kind],
              stock: await getStock(row.host_country, row.resource_kind), reserve_remaining: remaining - amount });
@@ -1414,15 +1428,19 @@ app.post('/api/economy/:code/collect-taxes', ah(auth), ah(async (req, res) => {
   if (!e) return res.status(400).json({ error: 'لا توجد بيانات اقتصادية' });
   if (e.revolt_active) return res.status(403).json({ error: 'لا يمكن جباية الضرائب أثناء الثورة الشعبية' });
   const nowG = await gameNow();
-  if (!canCollectNow(nowG, e.last_tax_collect))
+  const monthStart = gameMonthIdx(nowG) * GAME_MONTH_MS; // بداية شهر اللعبة الحالي بالمللي
+  // حجز ذري لشهر اللعبة: أول طلب فقط ينجح — يمنع غليتش الأموال عند الضغط المزدوج
+  const claim = await q('UPDATE country_economy SET last_tax_collect=$1 WHERE country_code=$2 AND (last_tax_collect IS NULL OR last_tax_collect < $3)',
+    [nowG, cc, monthStart]);
+  if (!claim.rowCount)
     return res.status(400).json({ error: 'تمت الجباية هذا الشهر — عُد الشهر القادم (شهر لعبة = ساعتان)' });
   const rate = e.tax_rate != null ? Number(e.tax_rate) : 10;
   const gdp = e.gdp_m_intl != null ? Number(e.gdp_m_intl) : null;
   const liq = e.liquidity_m_usd != null ? Number(e.liquidity_m_usd) : null;
   const base = gdp || (liq != null ? liq / 0.04 : 0);
   const amount = Math.round(base * (rate / 100) / 12);
-  await q('UPDATE country_economy SET liquidity_m_usd = COALESCE(liquidity_m_usd,0) + $2, last_tax_collect=$3 WHERE country_code=$1',
-    [cc, amount, nowG]);
+  await q('UPDATE country_economy SET liquidity_m_usd = COALESCE(liquidity_m_usd,0) + $2 WHERE country_code=$1',
+    [cc, amount]);
   await logLiq(cc, amount, `جباية الضرائب الشهرية بنسبة ${rate}%`, req.user.username);
   const ne = await one('SELECT liquidity_m_usd FROM country_economy WHERE country_code=$1', [cc]);
   res.json({ ok: true, amount, liquidity: Number(ne.liquidity_m_usd) || 0 });
