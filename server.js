@@ -4045,6 +4045,25 @@ async function llmGovernTurn(cc, monthIdx) {
   const treaties = await all(`SELECT type, from_code, to_code FROM treaties
                               WHERE status='active' AND (from_code=$1 OR to_code=$1)`, [cc]);
   const pending = await all(`SELECT id, type, from_code FROM treaties WHERE to_code=$1 AND status='proposed'`, [cc]);
+  const myRep = await getReputation(cc).catch(() => 70);
+  // ذاكرة العلاقات: آخر الأحداث التي تخص هذه الدولة — ليحقد ويحذر ويكافئ كبشر
+  const memRows = await all(`SELECT type, actor_code, target_code, title FROM game_events
+                             WHERE actor_code=$1 OR target_code=$1
+                             ORDER BY id DESC LIMIT 8`, [cc]).catch(() => []);
+  // إثراء المعاهدات المعلقة: حرب؟ سمعة المقترح؟ معاهدات سارية معه؟
+  const pendingRich = [];
+  for (const t of pending) {
+    const other = t.from_code;
+    const atWar = !!(await activeWarBetween(cc, other).catch(() => null));
+    const rep = await getReputation(other).catch(() => 70);
+    const ex = await all(`SELECT type FROM treaties WHERE status='active'
+      AND ((from_code=$1 AND to_code=$2) OR (from_code=$2 AND to_code=$1))`, [cc, other])
+      .catch(() => []);
+    pendingRich.push({
+      id: t.id, type: t.type, from: other, from_name: cname(other),
+      at_war: atWar, proposer_reputation: rep, existing: ex.map((x) => x.type),
+    });
+  }
   const claimed = await aiClaimedSet();
   const armies = await all(`SELECT country_code, soldiers FROM armies ORDER BY soldiers DESC LIMIT 10`);
   const state = {
@@ -4058,23 +4077,34 @@ async function llmGovernTurn(cc, monthIdx) {
       enemy_score: w.attacker_code === cc ? w.score_b : w.score_a,
     })),
     treaties: treaties.map((t) => ({ type: t.type, with: t.from_code === cc ? t.to_code : t.from_code })),
-    pending_treaties: pending.map((t) => ({ id: t.id, type: t.type, from: t.from_code, from_name: cname(t.from_code) })),
+    pending_treaties: pendingRich,
+    reputation: myRep,
+    memory: memRows.map((m) => ({
+      what: m.type, who: m.actor_code === cc ? m.target_code : m.actor_code, title: m.title,
+    })),
     top_armies: armies.filter((a) => a.country_code !== cc).map((a) => ({
       code: a.country_code, soldiers: a.soldiers, human: claimed.has(a.country_code),
     })),
   };
   const sys = 'أنت الحاكم الأعلى لدولة ' + state.country + ' في لعبة محاكاة جيوسياسية سنة 1900. '
     + 'شخصيتك الاستراتيجية: ' + strategy + ' (conservative حذر دفاعي، balanced متوازن، expansionist توسعي طموح). '
+    + 'تصرف كحاكم بشري حقيقي لا كآلة: لديك ذاكرة — من حاربك أو خان معاهدة لا تنساه سريعًا، ومن أحسن إليك تكافئه. '
+    + 'تفرح بالقوة وتحذر من التهديد وتغضب من الخيانة. حلل الوضع أولًا ثم قرر. '
     + 'كل شهر لعبة تتخذ قرارات حكيمة تحفظ الدولة وتنميها. أجب بـJSON فقط بهذا الشكل (كل حقل اختياري):\n'
     + '{"tax_rate": 0-30, "recruit": 0-20000, "train": true/false, "found_company": true/false,\n'
     + ' "treaty_decisions": [{"id": 123, "accept": true/false}],\n'
     + ' "treaties": [{"type": "non_aggression|trade|alliance|defensive", "to": "CODE"}],\n'
     + ' "spy": {"target": "CODE", "kind": "economy|stability"},\n'
     + ' "declare_war": "CODE أو null",\n'
-    + ' "reason": "سطر واحد يشرح منطقك"}\n'
+    + ' "message": {"to": "CODE", "text": "رسالة دبلوماسية"},\n'
+    + ' "reason": "سطر واحد: تحليلك للوضع ثم منطق قراراتك"}\n'
     + 'قواعد صارمة: الضريبة المرتفعة تهز الاستقرار. لا تعلن حربًا إلا بتفوق عسكري واضح واستقرار فوق 55. '
     + 'الحروب المنطقية فقط: نفس قارتك، أو قوة عظمى (80 ألف+ جندي) داخل إقليمك، أو قوة بحرية عظمى (100 ألف+ جندي ببحرية حربية) عبر البحار — سويسرا محايدة دائمًا فلا تهاجمها أبدًا. '
-    + 'لا تقترح معاهدة من نوع سارٍ أصلًا مع نفس الدولة. التجسس مكلف وقد يُكشف فيهبط سمعتك.';
+    + 'لا تقترح معاهدة من نوع سارٍ أصلًا مع نفس الدولة. التجسس مكلف وقد يُكشف فيهبط سمعتك. '
+    + 'اقبل/ارفض المعاهدات كبشر: انظر لسمعة المقترح (proposer_reputation)، وهل بينكم حرب (at_war)، وتاريخه معك في الذاكرة — '
+    + 'لا تقبل تحالفًا ممن خانك أو حاربك قريبًا، وكافئ من أحسن إليك. '
+    + 'message: رسالة دبلوماسية واحدة شهريًا كحد أقصى، ولدولة يحكمها لاعب بشري فقط (human=true) — '
+    + 'تحذير من تحركاته، عرض معاهدة، تهنئة، استفسار، أو رد على حدث يخصك — بأسلوبك البشري الحي لا بصيغة رسمية جافة. لا ترسل إن لم يكن لديك ما تقوله فعلًا.';
   const raw = await llmChat([
     { role: 'system', content: sys },
     { role: 'user', content: 'حالة الدولة هذا الشهر (أرقام بالمليون دولار والجنود):\n' + JSON.stringify(state) },
@@ -4165,6 +4195,24 @@ async function llmGovernTurn(cc, monthIdx) {
         try { await declareWarInternal(cc, tc, A); notes.push('حرب على ' + cname(tc)); }
         catch (err) { /* رفضها المحرك */ }
       }
+    }
+  }
+  // 9) رسالة دبلوماسية استباقية — للاعبين البشر فقط، واحدة شهريًا كحد أقصى
+  if (d.message && typeof d.message.to === 'string' && typeof d.message.text === 'string') {
+    const toCC = d.message.to.toUpperCase();
+    const txt = d.message.text.trim().slice(0, 500);
+    if (txt && toCC !== cc && COUNTRIES.some((c) => c.code === toCC) && claimed.has(toCC)) {
+      try {
+        const emb = await ensureAiEmbassy(cc);
+        const hu = await one(`SELECT id FROM users WHERE country_code=$1
+                              AND role NOT IN ('system','developer','ai_embassy')`, [toCC]);
+        if (hu && emb) {
+          await q('INSERT INTO messages (sender_id,receiver_id,body,created_at) VALUES ($1,$2,$3,$4)',
+            [emb.id, hu.id, txt, Date.now()]);
+          await notifyCountry(toCC, 'message', `رسالة من ${cname(cc)}`, txt.slice(0, 80), '#/messages');
+          notes.push('رسالة إلى ' + cname(toCC));
+        }
+      } catch (err) { /* تجميلي — لا يفشل الدور */ }
     }
   }
   await audit('ai_llm_turn', A, `${cname(cc)}: دور لغوي — ${notes.length ? notes.join('، ') : 'مراقبة بلا تغيير'}${d.reason ? ' — ' + String(d.reason).slice(0, 140) : ''}`);
