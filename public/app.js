@@ -2672,11 +2672,23 @@ async function vDiplomacy() {
   if (!me) { location.hash = '#/login'; return; }
   const myCC = me.country_code;
   app.innerHTML = thead('الدبلوماسية') + '<div id="dipbody"><div class="spin"></div></div>';
-  let d, rep = null;
+  let d, rep = null, pol = {};
   try {
     d = await api('GET', '/treaties');
-    if (myCC) { try { rep = (await api('GET', '/treaties/' + myCC)).reputation; } catch (x) {} }
+    if (myCC) {
+      try { rep = (await api('GET', '/treaties/' + myCC)).reputation; } catch (x) {}
+      try { pol = (await api('GET', '/autopolicy')).policies || {}; } catch (x) {}
+    }
   } catch (e) { document.getElementById('dipbody').innerHTML = `<div class="empty">${esc(e.message || 'تعذر التحميل')}</div>`; return; }
+  const POL_OPTS = [['manual', 'يدوي — أقرر بنفسي'], ['accept', 'قبول تلقائي'], ['reject', 'رفض تلقائي']];
+  const POL_ROWS = [...TREATY_OPTS.map(([v, l]) => [v, l]), ['peace_offer', 'عروض السلام']];
+  const polRow = ([v, l]) => `<div class="field"><label>${esc(l)}</label>
+    <select data-pol="${v}" onchange="autopolicySet('${v}', this.value)">
+      ${POL_OPTS.map(([pv, pl]) => `<option value="${pv}"${(pol[v] || 'manual') === pv ? ' selected' : ''}>${pl}</option>`).join('')}
+    </select></div>`;
+  const polSec = myCC ? `<div class="war-sec"><div class="war-sec-t">${ICONS.gear} القبول والرفض التلقائي</div>
+    <div class="map-ed">${POL_ROWS.map(polRow).join('')}</div>
+    <p class="hint">أي عرض يصلك يُقرَّر تلقائيًا حسب سياستك — حتى وأنت غائب. القبول التلقائي لا يشمل دولة في حرب معك.</p></div>` : '';
   const ts = d.treaties || [];
   const tCard = (t, btns) => `<div class="wpn-card"><div class="wpn-tx">
       <b>${esc(t.type_label || t.type)}</b> ${t.secret ? `<span class="co-badge">${ICONS.lock} سرية</span>` : ''}
@@ -2691,6 +2703,7 @@ async function vDiplomacy() {
     ${myCC && rep != null ? `<div class="war-sec"><div class="war-sec-t">${ICONS.doc} سمعتك الدبلوماسية</div>
       <div class="map-ed"><div class="field"><label>السمعة (من 100)</label><div class="stat-v" style="font-size:20px">${rep}</div></div></div>
       <p class="hint">كسر المعاهدات يخصم 20 نقطة. الانكشاف في عمليات تجسس يخصم 5.</p></div>` : ''}
+    ${polSec}
     ${incoming.length ? `<div class="war-sec"><div class="war-sec-t">${ICONS.bell} مقترحات واردة (${incoming.length})</div>
       <div class="wpn-grid">${incoming.map((t) => tCard(t,
         `<button class="btn sm" onclick="treatyAccept(${t.id})">قبول</button><button class="btn ghost sm" onclick="treatyReject(${t.id})">رفض</button>`)).join('')}</div></div>` : ''}
@@ -2731,6 +2744,10 @@ async function treatyBreak(id) {
   if (!confirm('كسر هذه المعاهدة؟ تحذير: ستخسر 20 نقطة من سمعتك الدبلوماسية.')) return;
   try { await api('POST', '/treaties/' + id + '/break'); alert('كُسرت المعاهدة — خسرت 20 نقطة سمعة'); vDiplomacy(); }
   catch (e) { alert(e.message); }
+}
+async function autopolicySet(type, policy) {
+  try { await api('PUT', '/autopolicy', { type, policy }); toast('حُفظت السياسة ✓'); }
+  catch (e) { alert(e.message); vDiplomacy(); }
 }
 
 // ---------- الاستخبارات ----------

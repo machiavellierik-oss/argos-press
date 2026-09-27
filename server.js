@@ -1054,6 +1054,18 @@ async function seedDiplomacy() {
   await q(`CREATE TABLE IF NOT EXISTS country_diplo (
     country_code TEXT PRIMARY KEY, reputation INTEGER NOT NULL DEFAULT 70, updated_at BIGINT
   )`);
+  // سياسة القبول/الرفض التلقائي للمعاهدات وعروض السلام — يضبطها صاحب الدولة البشرية
+  await q(`CREATE TABLE IF NOT EXISTS treaty_autopolicy (
+    country_code TEXT NOT NULL, treaty_type TEXT NOT NULL,
+    policy TEXT NOT NULL DEFAULT 'manual', updated_at BIGINT,
+    PRIMARY KEY (country_code, treaty_type)
+  )`);
+}
+async function getTreatyPolicy(cc, type) {
+  const r = await one('SELECT policy FROM treaty_autopolicy WHERE country_code=$1 AND treaty_type=$2', [cc, type])
+    .catch(() => null);
+  const p = r && r.policy;
+  return p === 'accept' || p === 'reject' ? p : 'manual';
 }
 async function getReputation(cc) {
   const r = await one('SELECT reputation FROM country_diplo WHERE country_code=$1', [cc]);
@@ -1322,6 +1334,13 @@ async function peaceInternal(warId, meCC, actorUsername, force) {
   await emitEvent('peace_proposed', meSide, otherSide, `${cname(meSide)} تعرض السلام على ${cname(otherSide)}`, { war_id: w.id });
   await notifyCountry(otherSide, 'peace_offer', `${cname(meSide)} تعرض السلام`,
     `${cname(meSide)} عرضت إنهاء الحرب سلميًا. اقبل من صفحة الحرب.`, '#/news');
+  // قبول تلقائي لعروض السلام حسب سياسة الطرف الآخر (إن كان بشريًا وضبطها)
+  const peacePol = await getTreatyPolicy(otherSide, 'peace_offer').catch(() => 'manual');
+  if (peacePol === 'accept') {
+    const auto = await peaceInternal(w.id, otherSide, 'auto_policy');
+    await audit('war_peace_auto', 'auto_policy', `قبول تلقائي لعرض السلام — ${cname(otherSide)} أنهت الحرب`);
+    return auto;
+  }
   return { proposed: true };
 }
 
@@ -1405,8 +1424,17 @@ async function proposeTreaty(from, to, type, secret, actorUsername) {
     [type, from, to, secret ? 1 : 0, g, Date.now()]);
   await emitEvent('treaty_proposed', from, to, `${cname(from)} تقترح ${TREATY_TYPES[type]} على ${cname(to)}`, { treaty_id: r.rows[0].id, secret: !!secret });
   await audit('treaty_propose', actorUsername, `اقتراح ${type} من ${from} إلى ${to}${secret ? ' (سرية)' : ''}`);
-  await notifyCountry(to, 'treaty', `عرض معاهدة من ${cname(from)}`,
-    `${cname(from)} تقترح عليك: ${TREATY_TYPES[type]}${secret ? ' (سرية)' : ''}. اقبل أو ارفض من قسم الدبلوماسية.`, '#/news');
+  // سياسة القبول/الرفض التلقائي لصاحب الدولة المستلمة — القبول التلقائي لا يشمل دولة في حرب معك
+  const pol = await getTreatyPolicy(to, type).catch(() => 'manual');
+  const atWarWith = pol === 'accept' ? !!(await activeWarBetween(from, to).catch(() => null)) : false;
+  if ((pol === 'accept' && !atWarWith) || pol === 'reject') {
+    await respondTreaty({ id: r.rows[0].id, type, from_code: from, to_code: to }, pol === 'accept', 'auto_policy');
+    await notifyCountry(to, 'treaty', pol === 'accept' ? 'قُبلت معاهدة تلقائيًا' : 'رُفضت معاهدة تلقائيًا',
+      `${cname(from)} اقترح: ${TREATY_TYPES[type]} — ${pol === 'accept' ? 'قُبلت' : 'رُفضت'} تلقائيًا حسب سياستك.`, '#/news');
+  } else {
+    await notifyCountry(to, 'treaty', `عرض معاهدة من ${cname(from)}`,
+      `${cname(from)} تقترح عليك: ${TREATY_TYPES[type]}${secret ? ' (سرية)' : ''}. اقبل أو ارفض من قسم الدبلوماسية.`, '#/news');
+  }
   return r.rows[0].id;
 }
 app.post('/api/treaties/propose', ah(auth), ah(async (req, res) => {
@@ -1458,6 +1486,36 @@ app.post('/api/treaties/:id/break', ah(auth), ah(async (req, res) => {
   if (myCC !== t.from_code && myCC !== t.to_code) return res.status(400).json({ error: 'حدد الدولة الكاسرة' });
   const nv = await breakTreaty(t, myCC, 'كسر أحادي', req);
   res.json({ ok: true, reputation: nv });
+}));
+// سياسة القبول/الرفض التلقائي — صاحب الدولة (أو المطورون لدولة محددة)
+// GET: سياسات دولتي | PUT: {type, policy} حيث policy ∈ accept|reject|manual
+const AUTOPOLICY_TYPES = [...Object.keys(TREATY_TYPES), 'peace_offer'];
+app.get('/api/autopolicy', ah(auth), ah(async (req, res) => {
+  const cc = req.user.country_code;
+  const policies = {};
+  if (cc) {
+    const rows = await all('SELECT treaty_type, policy FROM treaty_autopolicy WHERE country_code=$1', [cc]);
+    for (const r of rows) policies[r.treaty_type] = r.policy;
+  }
+  res.json({ policies });
+}));
+app.put('/api/autopolicy', ah(auth), ah(async (req, res) => {
+  const dev = isDeveloper(req.user);
+  const b = req.body || {};
+  const type = String(b.type || '');
+  const policy = String(b.policy || '');
+  if (!AUTOPOLICY_TYPES.includes(type)) return res.status(400).json({ error: 'نوع غير صالح' });
+  if (!['accept', 'reject', 'manual'].includes(policy)) return res.status(400).json({ error: 'سياسة غير صالحة' });
+  if (!dev && b.country_code && String(b.country_code).toUpperCase() !== req.user.country_code)
+    return res.status(403).json({ error: 'غير مصرح — لا يمكنك ضبط سياسة دولة أخرى' });
+  const target = dev && b.country_code ? String(b.country_code).toUpperCase() : req.user.country_code;
+  if (!target || !validCountry(target)) return res.status(403).json({ error: 'تحتاج دولة لضبط السياسة' });
+  if (!dev && target !== req.user.country_code) return res.status(403).json({ error: 'غير مصرح' });
+  await q(`INSERT INTO treaty_autopolicy (country_code,treaty_type,policy,updated_at) VALUES ($1,$2,$3,$4)
+           ON CONFLICT (country_code,treaty_type) DO UPDATE SET policy=EXCLUDED.policy, updated_at=EXCLUDED.updated_at`,
+    [target, type, policy, Date.now()]);
+  await audit('autopolicy', req.user.username, `${target}: ${type} → ${policy}`);
+  res.json({ ok: true });
 }));
 // تعديل تعداد جيش دولة — المطورون فقط
 app.post('/api/armies/:code', ah(auth), requireDeveloper, ah(async (req, res) => {
