@@ -3745,11 +3745,24 @@ app.get('/api/ai/embassies', ah(auth), ah(async (req, res) => {
   res.json(out);
 }));
 // العقل الدبلوماسي: رد نصي + أفعال حقيقية أحيانًا
-async function aiDiplomaticReply(playerCC, aiCC, body) {
+async function aiDiplomaticReply(playerCC, aiCC, body, playerId, embassyId) {
+  // سجل الحوار الأخير بين الطرفين — ليكون الرد حديثًا حقيقيًا لا جملة مكررة
+  let hist = [];
+  if (playerId && embassyId) {
+    try {
+      const rows = await all(`SELECT sender_id, body FROM messages
+        WHERE (sender_id=$1 AND receiver_id=$2) OR (sender_id=$2 AND receiver_id=$1)
+        ORDER BY created_at DESC LIMIT 6`, [playerId, embassyId]);
+      hist = rows.reverse().map((r) => ({
+        mine: Number(r.sender_id) === Number(embassyId),
+        body: String(r.body || '').slice(0, 200),
+      }));
+    } catch (e) { hist = []; }
+  }
   // 🧠 رد لغوي طبيعي + فعل آمن — عند الفشل يُستخدم القاعدي
   if (await llmEnabled()) {
     try {
-      const lr = await llmEmbassyReply(playerCC, aiCC, body);
+      const lr = await llmEmbassyReply(playerCC, aiCC, body, hist);
       const act = String(lr.action || 'none');
       const w = await activeWarBetween(aiCC, playerCC);
       if (act === 'peace' && w) { try { await peaceInternal(w.id, aiCC, LLM_ACTOR); } catch (e) { /* رفضها المحرك */ } }
@@ -3806,13 +3819,28 @@ async function aiDiplomaticReply(playerCC, aiCC, body) {
   } else if (has('حرب', 'war', 'guerre') && !w) {
     reply = `الحرب كلمة ثقيلة ${flavor} — نفضل أن نحل خلافاتنا بالحوار والمعاهدات.`;
   } else {
-    const state = stab < 40 ? ' نمر بظروف داخلية دقيقة، لكن أبوابنا مفتوحة للحوار.' : '';
+    const trs = await all(`SELECT type FROM treaties WHERE status='active'
+      AND ((from_code=$1 AND to_code=$2) OR (from_code=$2 AND to_code=$1))`, [aiCC, playerCC])
+      .catch(() => []);
+    const treatyTxt = trs.length ? `وبيننا ${trs.map((t) => t.type).join(' و')} سارية نحترمها` : 'ولا معاهدات سارية بيننا حتى الآن';
+    const warTxt = w ? 'والحرب بيننا ما زالت مشتعلة — الكلام وحده لا يطفئها' : 'والسلم بيننا قائم';
+    const state = stab < 40 ? ' نمر بظروف داخلية دقيقة' : '';
     const defs = {
-      conservative: `نستلم رسالتكم وندرسها بحكمة.${state} دولتنا منشغلة ببناء اقتصادها وأمنها — اقترحوا شيئًا ملموسًا كمعاهدة أو تجارة.`,
-      balanced: `رسالتكم وصلت.${state} نحن منفتحون على الحوار — السلام والتجارة لغتنا. اطرحوا ما لديكم بوضوح.`,
-      expansionist: `نتسلم رسالتكم.${state} دولتنا قوية وماضية في طريقها — من يريد الحديث معنا فليأتِ بلغة المصالح.`,
+      conservative: [
+        `قرأنا رسالتكم بتأنٍ${state}. ${treatyTxt}، ${warTxt}. دولتنا تمضي بخطى محسوبة: نبني اقتصادنا ونحصّن حدودنا — فإن كان في كلامكم اقتراح عملي كمعاهدة أو تجارة فصيغوه بوضوح وسنطرحه على مجلسنا.`,
+        `تحية طيبة${state}. سياستنا لا تتغير بالعواطف: استقرار الداخل أولًا، وعلاقات محسوبة ثانيًا. ${treatyTxt}. حدثونا بلغة الأفعال — عرض ملموس واحد خير من عشر رسائل عامة.`,
+      ],
+      balanced: [
+        `رسالتكم وصلت${state}، ونحن منفتحون على الحوار دائمًا. ${treatyTxt}، ${warTxt}. السلام والتجارة لغتنا — فإن كان لديكم ما يخدم مصالح شعبينا فاطرحوه، وسنجد له صيغة ترضي الطرفين.`,
+        `أهلًا بكم${state}. الدبلوماسية عندنا حوار مستمر لا خُطب. ${treatyTxt}. أخبرونا ما الذي يشغل بالكم تحديدًا — حدود، تجارة، أم مجرد تعارف؟ وسنردكم بصراحة تليق بالحكام.`,
+      ],
+      expansionist: [
+        `وصلتنا رسالتكم${state}. ${treatyTxt}، ${warTxt} — ودولتنا تعرف قدر نفسها جيدًا. من يريد الحديث معنا فليأتِ بلغة المصالح: ماذا تقدمون وماذا تطلبون؟ الكلام المرسل لا يحرك جيوشنا ولا أسواقنا.`,
+        `نستلم رسالتكم${state}. نحن أمة قوية ماضية في طريقها، نحترم الأقوياء ونتجاهل الثرثرة. ${treatyTxt}. إن كان لديكم عرض يليق بمقامنا — تحالف، تجارة، أو تسوية — فقولوه مباشرة وسنزنه بميزان القوة والمصلحة.`,
+      ],
     };
-    reply = defs[strategy] || defs.balanced;
+    const arr = defs[strategy] || defs.balanced;
+    reply = arr[Math.floor(Math.random() * arr.length)];
   }
   return reply;
 }
@@ -3845,7 +3873,7 @@ app.post('/api/messages', ah(auth), ah(async (req, res) => {
                             ORDER BY created_at DESC LIMIT 1`, [other.id, req.user.id]);
     if (!last || Date.now() - Number(last.created_at) > EMBASSY_COOLDOWN_MS) {
       try {
-        const reply = await aiDiplomaticReply(req.user.country_code, embassyCC, b);
+        const reply = await aiDiplomaticReply(req.user.country_code, embassyCC, b, req.user.id, other.id);
         await q('INSERT INTO messages (sender_id,receiver_id,body,created_at) VALUES ($1,$2,$3,$4)',
           [other.id, req.user.id, reply, Date.now()]);
         await audit('ai_embassy', AI_ACTOR, `رد سفارة ${cname(embassyCC)} على ${req.user.username}`);
@@ -4143,18 +4171,30 @@ async function llmGovernTurn(cc, monthIdx) {
   return true;
 }
 // رد السفارة عبر النموذج — نص طبيعي + فعل آمن واحد
-async function llmEmbassyReply(playerCC, aiCC, body) {
+async function llmEmbassyReply(playerCC, aiCC, body, hist) {
   const strategy = aiStrategyFor(aiCC);
   const w = await activeWarBetween(aiCC, playerCC);
   const trs = await all(`SELECT type FROM treaties WHERE status='active'
     AND ((from_code=$1 AND to_code=$2) OR (from_code=$2 AND to_code=$1))`, [aiCC, playerCC]);
-  const sys = 'أنت الحاكم الأعلى لدولة ' + cname(aiCC) + ' سنة 1900، شخصيتك: ' + strategy
-    + '. وصلتك رسالة دبلوماسية من حاكم ' + cname(playerCC) + '. رد بعربية فصيحة موجزة (جملتان فقط) بأسلوب يليق بشخصيتك. '
-    + 'أجب JSON فقط: {"reply": "نص الرد", "action": "none|non_aggression|trade|alliance|peace"} — '
-    + 'اختر peace فقط إن كنتم في حرب وتريد إنهاءها، ومعاهدة فقط إن لم تكن سارية.';
-  const ctx = 'السياق: ' + (w ? 'في حرب نشطة بيننا' : 'لا حرب بيننا')
-    + '. معاهدات سارية: ' + (trs.map((t) => t.type).join('، ') || 'لا شيء')
-    + '. الرسالة: "' + String(body).slice(0, 500) + '"';
+  const personalities = {
+    conservative: 'محافظ حذر: تقدّس الاستقرار والمؤسسات، كلامك موزون، لا تعد بما لا تملك، تحب المعاهدات المكتوبة',
+    balanced: 'متوازن واقعي: دبلوماسي مرن، لغة مصالح مشتركة، منفتح على الحوار بصدق',
+    expansionist: 'توسعي واثق: لغة القوة والمصالح وكبرياء وطني، لكنك تحاور بذكاء لا بصلف — وتكره الجمل المحفوظة',
+  };
+  const sys = 'أنت الحاكم الأعلى لدولة ' + cname(aiCC) + ' سنة 1900. شخصيتك: '
+    + (personalities[strategy] || personalities.balanced)
+    + '. تصلك رسالة دبلوماسية من حاكم ' + cname(playerCC) + '.'
+    + ' رد بعربية فصيحة حية (من جملتين إلى أربع): خاطب مضمون رسالته تحديدًا — لا جمل عامة محفوظة —'
+    + ' واستحضر سياق الحوار السابق إن وجد، وعلّق على الواقع (حرب/معاهدات) بصدق.'
+    + ' أجب JSON فقط: {"reply": "نص الرد", "action": "none|non_aggression|trade|alliance|peace"} —'
+    + ' اختر peace فقط إن كنتم في حرب وتريد إنهاءها، ومعاهدة فقط إن لم تكن سارية.';
+  let ctx = 'السياق: ' + (w ? 'في حرب نشطة بيننا' : 'لا حرب بيننا')
+    + '. معاهدات سارية: ' + (trs.map((t) => t.type).join('، ') || 'لا شيء') + '.';
+  if (hist && hist.length) {
+    ctx += '\nمقتطفات من حوارنا السابق:\n' + hist.map((h) =>
+      (h.mine ? 'أنا (حاكم ' + cname(aiCC) + ')' : 'هو (حاكم ' + cname(playerCC) + ')') + ': ' + h.body).join('\n');
+  }
+  ctx += '\nرسالته الآن: "' + String(body).slice(0, 500) + '"';
   const d = llmParseJSON(await llmChat(
     [{ role: 'system', content: sys }, { role: 'user', content: ctx }],
     { maxTokens: 600, temperature: 0.5, timeoutMs: 20000 }
