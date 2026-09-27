@@ -539,14 +539,17 @@ app.post('/api/admin/ai-config', ah(auth), requireStaff, ah(async (req, res) => 
 app.post('/api/admin/ai-test', ah(auth), requireStaff, ah(async (req, res) => {
   const t0 = Date.now();
   try {
+    // موديلات التفكير (reasoning) تستهلك الرصيد قبل إخراج JSON — نمنحها مساحة كافية وحرارة منخفضة
     const out = await llmChat(
       [{ role: 'user', content: 'أجب JSON فقط: {"ok": true}' }],
-      { maxTokens: 50 });
-    const d = llmParseJSON(out);
+      { maxTokens: 300, temperature: 0.2 });
+    let d;
+    try { d = llmParseJSON(out); }
+    catch (pe) { throw new Error('LLM_NO_JSON raw=' + String(out).slice(0, 120)); }
     const cfg = await getAiConfig();
     res.json({ ok: !!d.ok, ms: Date.now() - t0, provider: cfg.provider, model: cfg.model });
   } catch (e) {
-    res.status(502).json({ error: 'فشل الاتصال بالنموذج: ' + String(e.message).slice(0, 160) });
+    res.status(502).json({ error: 'فشل الاتصال بالنموذج: ' + String(e.message).slice(0, 280) });
   }
 }));
 app.get('/api/admin/users', ah(auth), requireStaff, ah(async (req, res) => {
@@ -3984,8 +3987,12 @@ async function llmChat(messages, { maxTokens = 1500, json = true, temperature = 
       throw new Error('LLM_HTTP_' + r.status + ' ' + String(t).slice(0, 200));
     }
     const j = await r.json();
-    const c = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
-    if (!c) throw new Error('LLM_EMPTY');
+    const msg = j && j.choices && j.choices[0] && j.choices[0].message;
+    let c = msg && msg.content;
+    // بعض البوابات المتوافقة مع OpenAI ترجع المحتوى مصفوفة أجزاء بدل نص
+    if (Array.isArray(c)) c = c.map((pp) => (pp && (pp.text || pp.content)) || '').join('\n');
+    if (typeof c !== 'string') c = c != null ? String(c) : '';
+    if (!c.trim()) throw new Error('LLM_EMPTY');
     return c;
   } finally { clearTimeout(timer); }
 }
@@ -4043,7 +4050,7 @@ async function llmGovernTurn(cc, monthIdx) {
   const raw = await llmChat([
     { role: 'system', content: sys },
     { role: 'user', content: 'حالة الدولة هذا الشهر (أرقام بالمليون دولار والجنود):\n' + JSON.stringify(state) },
-  ], { timeoutMs: 30000 });
+  ], { timeoutMs: 30000, temperature: 0.3 });
   const d = llmParseJSON(raw);
   const notes = [];
   const A = LLM_ACTOR;
@@ -4150,7 +4157,7 @@ async function llmEmbassyReply(playerCC, aiCC, body) {
     + '. الرسالة: "' + String(body).slice(0, 500) + '"';
   const d = llmParseJSON(await llmChat(
     [{ role: 'system', content: sys }, { role: 'user', content: ctx }],
-    { maxTokens: 600, temperature: 0.8, timeoutMs: 20000 }
+    { maxTokens: 600, temperature: 0.5, timeoutMs: 20000 }
   ));
   const reply = String(d.reply || '').slice(0, 1000);
   if (!reply) throw new Error('LLM_EMPTY_REPLY');
