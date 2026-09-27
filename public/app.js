@@ -489,7 +489,9 @@ async function vNews() {
       <div class="war-sec"><div class="war-sec-t">إعلانات المطورين — حالات الحرب والطوارئ</div><div id="wdecl"><div class="spin"></div></div></div>
       <div id="mapeditor"></div>
       <div class="war-sec"><div class="war-sec-t">شدة الصراع — نافذة 30 يومًا</div><div id="wtable"><div class="spin"></div></div></div>
-      <div class="war-sec"><div class="war-sec-t">الموجز اليومي</div><div id="wbriefs"><div class="spin"></div></div></div>`;
+      <div class="war-sec"><div class="war-sec-t">الموجز اليومي</div><div id="wbriefs"><div class="spin"></div></div></div>
+      <div class="war-sec"><div class="war-sec-t">جيوش الدول — تعداد 1900</div><p class="hint" style="margin:0 0 10px">التعدادات تقديرات تاريخية تقريبية — اضغط على أي دولة لعرض ترسانتها الكاملة.</p><div id="warmies"><div class="spin"></div></div></div>
+      <div id="armymgr"></div>`;
   let rows = [], mstates = [];
   try { const d = await api('GET', '/conflict'); rows = d.rows || []; }
   catch (e) { /* يبقى فارغًا */ }
@@ -500,6 +502,8 @@ async function vNews() {
   renderBriefs(rows);
   renderDeclarations(mstates);
   if (me && me.role === 'developer') renderMapEditor(mstates);
+  await renderArmiesSection();
+  if (me && me.role === 'developer') renderArmyManager();
   mountClock(document.getElementById('clockbox'));
 }
 let THREE_PROMISE = null;
@@ -876,6 +880,152 @@ function renderDeclarations(mstates) {
       <time>${s.updated_at ? new Date(s.updated_at).toLocaleDateString('ar-EG') : ''}</time></div>
       <span class="st-badge st-${s.status}">${MAP_ST_AR[s.status]}</span></div>`;
   }).join('') + '</div>';
+}
+
+// ---------- جيوش الدول وتسليح 1900 ----------
+const fmtArmy = (n) => Number(n || 0).toLocaleString('en-US');
+async function renderArmiesSection() {
+  const el = document.getElementById('warmies'); if (!el) return;
+  let list = [];
+  try { const d = await api('GET', '/armies'); list = d.armies || []; }
+  catch (e) { el.innerHTML = '<div class="empty">تعذر تحميل بيانات الجيوش.</div>'; return; }
+  if (!list.length) { el.innerHTML = '<div class="empty">لا توجد بيانات بعد.</div>'; return; }
+  el.innerHTML = '<div class="army-grid">' + list.map((a) => {
+    const c = countryOf(a.country_code);
+    return `<a class="army-card" href="#/army/${a.country_code}">
+      <span class="war-flag">${c.flag}</span>
+      <span class="army-card-tx"><b>${esc(c.name)}</b>
+      <i>${fmtArmy(a.soldiers)} جندي${a.weapons_count ? ` · ${a.weapons_count} سلاح` : ''}</i></span>
+    </a>`;
+  }).join('') + '</div>';
+}
+// صفحة جيش دولة: التعداد + الترسانة الكاملة
+async function vArmy(code) {
+  code = String(code || '').toUpperCase();
+  const c = countryOf(code);
+  app.innerHTML = thead('جيش ' + c.name) + '<div id="armybody"><div class="spin"></div></div>';
+  let d;
+  try { d = await api('GET', '/armies/' + code); }
+  catch (e) { document.getElementById('armybody').innerHTML = '<div class="empty">تعذر التحميل.</div>'; return; }
+  const a = d.army, ws = d.weapons || [];
+  const byClass = {};
+  ws.forEach((w) => { (byClass[w.class] = byClass[w.class] || []).push(w); });
+  document.getElementById('armybody').innerHTML = `
+    <div class="army-hero"><span class="war-flag big">${c.flag}</span>
+      <div><h2>جيش ${esc(c.name)}</h2>
+      <p class="army-count">${fmtArmy(a ? a.soldiers : 0)} جندي <span class="hint">(تعداد 1900 — تقدير تاريخي)</span></p>
+      ${a && a.note ? `<p class="hint">${esc(a.note)}</p>` : ''}</div></div>
+    ${Object.keys(byClass).length ? Object.entries(byClass).map(([cls, items]) => `
+      <div class="war-sec"><div class="war-sec-t">${esc(cls)}</div><div class="wpn-grid">
+      ${items.map((w) => `
+        <div class="wpn-card">
+          ${w.image_url ? `<img src="${esc(w.image_url)}" alt="" loading="lazy">` : `<div class="wpn-noimg">${ICONS.shield}</div>`}
+          <div class="wpn-tx"><b>${esc(w.name)}</b>
+            <span>النوع: ${esc(w.wtype || '—')}</span>
+            <span>الطراز: ${esc(w.model || '—')}</span>
+            <span class="wpn-qty">العدد: ${w.quantity == null ? "—" : fmtArmy(w.quantity)}</span></div>
+        </div>`).join('')}
+      </div></div>`).join('') : '<div class="empty">لا توجد أسلحة مسجلة لهذه الدولة بعد.</div>'}
+    <a class="btn ghost" href="#/news" style="margin-top:12px">← عودة لغرفة الحرب</a>`;
+}
+// ---------- إدارة الجيوش (المطورون فقط) ----------
+async function renderArmyManager() {
+  const el = document.getElementById('armymgr'); if (!el) return;
+  let list = [];
+  try { const d = await api('GET', '/armies'); list = d.armies || []; } catch (e) {}
+  const cmap = {}; list.forEach((a) => { cmap[a.country_code] = a; });
+  el.innerHTML = `<div class="war-sec dev-sec"><div class="war-sec-t">${ICONS.shield} إدارة الجيوش — المطورون فقط</div>
+    <div class="map-ed">
+      <div class="field"><label>الدولة</label><select id="am-country" onchange="armyLoad()">
+        ${COUNTRIES.map((c) => `<option value="${c.code}">${c.flag} ${c.name}</option>`).join('')}</select></div>
+      <div class="field"><label>عدد الجنود</label><input id="am-soldiers" type="number" min="0" dir="ltr"></div>
+      <div class="field"><label>ملاحظة</label><input id="am-note" placeholder="مثال: تقدير تاريخي"></div>
+      <div class="me-btns"><button class="btn" onclick="armySave()">${ICONS.checkSm} حفظ التعداد</button></div>
+    </div>
+    <div class="war-sec-t" style="margin-top:14px">أسلحة الدولة</div>
+    <div id="am-weapons"><div class="spin"></div></div>
+    <div class="war-sec-t" style="margin-top:14px">إضافة / تعديل سلاح</div>
+    <div class="map-ed">
+      <input type="hidden" id="wpn-id">
+      <div class="field"><label>الاسم الكامل</label><input id="wpn-name" placeholder="مثال: بندقية لي-إنفيلد"></div>
+      <div class="field"><label>الصنف</label><input id="wpn-class" placeholder="بنادق / مدفعية / رشاشات / سفن..."></div>
+      <div class="field"><label>النوع</label><input id="wpn-type" placeholder="بندقية مشاة تكرارية"></div>
+      <div class="field"><label>الطراز</label><input id="wpn-model" placeholder="Mk I" dir="ltr"></div>
+      <div class="field"><label>العدد</label><input id="wpn-qty" type="number" min="0" dir="ltr"></div>
+      <div class="field"><label>صورة السلاح</label><input id="wpn-img" type="file" accept="image/*"><div id="wpn-preview" style="margin-top:6px"></div></div>
+      <div class="me-btns">
+        <button class="btn" onclick="wpnSave()">${ICONS.checkSm} حفظ السلاح</button>
+        <button class="btn ghost" onclick="wpnClear()">جديد</button>
+      </div>
+    </div></div>`;
+  window._armies = cmap;
+  armyLoad();
+}
+async function armyLoad() {
+  const code = val('am-country');
+  const a = (window._armies || {})[code];
+  document.getElementById('am-soldiers').value = a ? a.soldiers : 0;
+  document.getElementById('am-note').value = a && a.note ? a.note : '';
+  const box = document.getElementById('am-weapons');
+  box.innerHTML = '<div class="spin"></div>';
+  try {
+    const d = await api('GET', '/armies/' + code);
+    const ws = d.weapons || [];
+    box.innerHTML = ws.length ? '<div class="wpn-list">' + ws.map((w) => `
+      <div class="wpn-row"><div class="wpn-row-tx"><b>${esc(w.name)}</b>
+        <span class="hint">${esc(w.class || '')} · ${esc(w.wtype || '')} · ${esc(w.model || '')} · العدد: ${w.quantity == null ? "—" : fmtArmy(w.quantity)}</span></div>
+        <button class="btn ghost sm" onclick='wpnEdit(${JSON.stringify(w.id)})'>تعديل</button>
+        <button class="btn danger sm" onclick='wpnDel(${JSON.stringify(w.id)})'>حذف</button></div>`).join('') + '</div>'
+      : '<div class="empty">لا توجد أسلحة — أضف أول سلاح من النموذج بالأسفل.</div>';
+    window._weapons = {}; ws.forEach((w) => { window._weapons[w.id] = w; });
+  } catch (e) { box.innerHTML = '<div class="empty">تعذر التحميل.</div>'; }
+}
+async function armySave() {
+  const code = val('am-country');
+  try {
+    await api('POST', '/armies/' + code, { soldiers: val('am-soldiers'), note: val('am-note') });
+    alert('حُفظ تعداد الجيش ✓'); vNews();
+  } catch (e) { alert(e.message); }
+}
+function wpnClear() {
+  ['wpn-id', 'wpn-name', 'wpn-class', 'wpn-type', 'wpn-model', 'wpn-qty'].forEach((id) => { document.getElementById(id).value = ''; });
+  document.getElementById('wpn-img').value = '';
+  document.getElementById('wpn-preview').innerHTML = '';
+}
+function wpnEdit(id) {
+  const w = (window._weapons || {})[id]; if (!w) return;
+  document.getElementById('wpn-id').value = w.id;
+  document.getElementById('wpn-name').value = w.name || '';
+  document.getElementById('wpn-class').value = w.class || '';
+  document.getElementById('wpn-type').value = w.wtype || '';
+  document.getElementById('wpn-model').value = w.model || '';
+  document.getElementById('wpn-qty').value = w.quantity == null ? '' : w.quantity;
+  document.getElementById('wpn-preview').innerHTML = w.image_url ? `<img src="${esc(w.image_url)}" style="max-width:120px;border-radius:8px">` : '';
+  window.scrollTo(0, document.getElementById('wpn-name').offsetTop - 80);
+}
+async function wpnDel(id) {
+  if (!confirm('حذف هذا السلاح نهائيًا؟')) return;
+  try { await api('DELETE', '/weapons/' + id); armyLoad(); }
+  catch (e) { alert(e.message); }
+}
+async function wpnSave() {
+  const code = val('am-country');
+  const id = document.getElementById('wpn-id').value;
+  let image_url = null;
+  const f = document.getElementById('wpn-img').files[0];
+  const prev = document.querySelector('#wpn-preview img');
+  if (f) { try { image_url = await uploadImage(f); } catch (e) { alert(e.message); return; } }
+  else if (prev) image_url = prev.getAttribute('src');
+  const body = {
+    country_code: code,
+    name: val('wpn-name'), class: val('wpn-class'), wtype: val('wpn-type'),
+    model: val('wpn-model'), quantity: val('wpn-qty'), image_url,
+  };
+  try {
+    if (id) await api('PUT', '/weapons/' + id, body);
+    else await api('POST', '/weapons', body);
+    alert('حُفظ السلاح ✓'); wpnClear(); armyLoad();
+  } catch (e) { alert(e.message); }
 }
 
 // ---------- محرر الخريطة (حساب المطورين فقط) ----------
@@ -1745,6 +1895,7 @@ async function route() {
     else if (h === '#/dispatches') await vDispatches();
     else if (h === '#/dossiers') await vDossiers();
     else if (h === '#/news') await vNews();
+    else if (h.startsWith('#/army/')) await vArmy(h.split('/')[2]);
     else if (h.startsWith('#/dossier/')) await vDossier(decodeURIComponent(h.split('/')[2] || ''));
     else if (h === '#/login') vLogin();
     else if (h === '#/register') await vRegister();

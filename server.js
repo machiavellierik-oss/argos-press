@@ -206,6 +206,7 @@ async function initDb() {
        VALUES ($1,'#f4212e','war',$2,NULL,$3)`,
       [w.cc, w.label, Date.now()]);
   }
+  await seedArmies();
   const n = await one('SELECT COUNT(*) AS c FROM articles');
   if (Number(n.c) === 0) {
     await q(
@@ -651,6 +652,143 @@ app.post('/api/map-states', ah(auth), requireDeveloper, ah(async (req, res) => {
 }));
 app.delete('/api/map-states/:code', ah(auth), requireDeveloper, ah(async (req, res) => {
   await q('DELETE FROM map_states WHERE country_code=$1', [req.params.code]);
+  res.json({ ok: true });
+}));
+
+// ---------- جيوش الدول وتسليح 1900 ----------
+// armies: تعداد الجنود لكل دولة | weapons: ترسانة كل دولة (صنف/نوع/طراز/اسم/عدد/صورة)
+async function seedArmies() {
+  await q(`CREATE TABLE IF NOT EXISTS armies (
+    country_code TEXT PRIMARY KEY, soldiers INTEGER DEFAULT 0, note TEXT,
+    updated_by INTEGER, updated_at BIGINT
+  )`);
+  await q(`CREATE TABLE IF NOT EXISTS weapons (
+    id SERIAL PRIMARY KEY, country_code TEXT, name TEXT, class TEXT,
+    wtype TEXT, model TEXT, quantity INTEGER, image_url TEXT,
+    created_by INTEGER, created_at BIGINT
+  )`);
+  // تعداد الجيوش النظامية سنة 1900 (تقديرات تاريخية تقريبية — قابلة للتعديل من المطورين)
+  const SOLDIERS = {
+    RU: 1062000, DE: 628400, FR: 623400, GB: 431800, CN: 364151, AT: 309200,
+    IT: 278000, OT: 277000, JP: 180000, ET: 162500, US: 137000, ES: 124400,
+    SN: 69800, RO: 62200, BE: 48720, BG: 42000, PT: 40000, RS: 35000,
+    NL: 35000, GR: 30000, MA: 30000, MX: 30000, AF: 25000, TV: 25000,
+    BR: 25000, CH: 25000, IR: 20000, NP: 20000, AR: 20000, DK: 18000,
+    CL: 15000, OF: 12000, TH: 12000, KR: 10000, ME: 8000, CO: 8000,
+    VE: 8000, PE: 8000, HT: 6000, BO: 5000, EC: 5000, UY: 5000,
+    HS: 5000, PY: 4000, DO: 4000, GT: 4000, HN: 3000, SV: 3000,
+    NI: 3000, OM: 3000, CR: 2000, LR: 2000, LU: 500,
+  };
+  for (const [cc, n] of Object.entries(SOLDIERS)) {
+    const ex = await one('SELECT country_code FROM armies WHERE country_code=$1', [cc]);
+    if (!ex) await q(
+      'INSERT INTO armies (country_code,soldiers,note,updated_at) VALUES ($1,$2,$3,$4)',
+      [cc, n, 'تقدير تاريخي لتعداد 1900 — قابل للتعديل', Date.now()]);
+  }
+  // الترسانة الافتتاحية للقوى الكبرى: [الدولة, الاسم الكامل, الصنف, النوع, الطراز, العدد]
+  const W = [
+    ['GB', 'بندقية لي-إنفيلد', 'بنادق', 'بندقية مشاة تكرارية', 'Mk I', 500000],
+    ['GB', 'رشاش مكسيم', 'رشاشات', 'رشاش ثقيل', 'Maxim Gun', 400],
+    ['GB', 'مدفع BL عيار 15 رطل', 'مدفعية', 'مدفع ميداني', 'BL 15-pounder', 300],
+    ['FR', 'بندقية لوبيل', 'بنادق', 'بندقية مشاة', 'M1886/93', 2000000],
+    ['FR', 'مدفع 75 ملم سريع الرمي', 'مدفعية', 'مدفع ميداني', 'mle 1897', 1000],
+    ['FR', 'رشاش هوتشكيس', 'رشاشات', 'رشاش ثقيل', 'M1900', 150],
+    ['DE', 'بندقية غيفير 98', 'بنادق', 'بندقية مشاة', 'Gewehr 98', 1000000],
+    ['DE', 'رشاش مكسيم الألماني', 'رشاشات', 'رشاش ثقيل', 'MG 99', 150],
+    ['DE', 'مدفع كروب 77 ملم', 'مدفعية', 'مدفع ميداني', 'FK 96', 800],
+    ['RU', 'بندقية موسين-ناغان', 'بنادق', 'بندقية مشاة', 'M1891', 3000000],
+    ['RU', 'رشاش مكسيم الروسي', 'رشاشات', 'رشاش ثقيل', 'M1895', 250],
+    ['RU', 'مدفع بوتيلوف 76.2 ملم', 'مدفعية', 'مدفع ميداني', 'M1900', 500],
+    ['US', 'بندقية كراغ-يورغنسن', 'بنادق', 'بندقية مشاة', 'M1898', 400000],
+    ['US', 'رشاش كولت (حفّار البطاطس)', 'رشاشات', 'رشاش ثقيل', 'M1895', 250],
+    ['US', 'مدفع 3.2 بوصة', 'مدفعية', 'مدفع ميداني', 'M1897', 150],
+    ['JP', 'بندقية أريساكا', 'بنادق', 'بندقية مشاة', 'Type 30', 500000],
+    ['JP', 'مدفع طراز 31 عيار 75 ملم', 'مدفعية', 'مدفع ميداني', 'Type 31', 300],
+    ['OT', 'بندقية ماوزر العثمانية', 'بنادق', 'بندقية مشاة', 'M1893', 500000],
+    ['OT', 'مدفع كروب 87 ملم', 'مدفعية', 'مدفع ميداني', 'Krupp 87mm', 300],
+    ['AT', 'بندقية مانليخر', 'بنادق', 'بندقية مشاة', 'M1895', 800000],
+    ['AT', 'مدفع ميداني 8 سم', 'مدفعية', 'مدفع ميداني', 'M1899', 250],
+    ['IT', 'بندقية كاركانو', 'بنادق', 'بندقية مشاة', 'M1891', 1000000],
+    ['IT', 'مدفع 75 ملم', 'مدفعية', 'مدفع ميداني', 'M1897', 200],
+    ['ES', 'بندقية ماوزر الإسبانية', 'بنادق', 'بندقية مشاة', 'M1893', 400000],
+    ['ES', 'مدفع كروب 90 ملم', 'مدفعية', 'مدفع ميداني', 'Krupp 90mm', 150],
+  ];
+  const wc = await one('SELECT COUNT(*) AS c FROM weapons');
+  if (Number(wc.c) === 0) {
+    for (const [cc, name, cls, type, model, qty] of W) {
+      await q(`INSERT INTO weapons (country_code,name,class,wtype,model,quantity,created_at)
+               VALUES ($1,$2,$3,$4,$5,$6,$7)`, [cc, name, cls, type, model, qty, Date.now()]);
+    }
+  }
+}
+
+// قائمة الجيوش — عامة
+app.get('/api/armies', ah(async (req, res) => {
+  const rows = await all(`SELECT a.country_code, a.soldiers, a.note,
+    COUNT(w.id) AS weapons_count
+    FROM armies a LEFT JOIN weapons w ON w.country_code=a.country_code
+    GROUP BY a.country_code, a.soldiers, a.note ORDER BY a.soldiers DESC`);
+  res.json({ armies: rows.map((r) => ({
+    country_code: r.country_code, soldiers: Number(r.soldiers) || 0,
+    note: r.note, weapons_count: Number(r.weapons_count) || 0,
+  })) });
+}));
+// تفاصيل جيش دولة + ترسانتها — عامة
+app.get('/api/armies/:code', ah(async (req, res) => {
+  const cc = String(req.params.code || '').toUpperCase();
+  if (!validCountry(cc)) return res.status(400).json({ error: 'كود دولة غير صالح' });
+  const a = await one('SELECT country_code,soldiers,note,updated_at FROM armies WHERE country_code=$1', [cc]);
+  const ws = await all(`SELECT id,country_code,name,class,wtype,model,quantity,image_url,created_at
+                        FROM weapons WHERE country_code=$1 ORDER BY id`, [cc]);
+  res.json({
+    army: a ? { country_code: a.country_code, soldiers: Number(a.soldiers) || 0, note: a.note } : null,
+    weapons: ws.map((w) => ({ ...w, quantity: w.quantity == null ? null : Number(w.quantity) })),
+  });
+}));
+// تعديل تعداد جيش دولة — المطورون فقط
+app.post('/api/armies/:code', ah(auth), requireDeveloper, ah(async (req, res) => {
+  const cc = String(req.params.code || '').toUpperCase();
+  if (!validCountry(cc)) return res.status(400).json({ error: 'كود دولة غير صالح' });
+  const soldiers = Math.max(0, parseInt(req.body.soldiers, 10) || 0);
+  const note = typeof req.body.note === 'string' ? req.body.note.slice(0, 300) : null;
+  await q(`INSERT INTO armies (country_code,soldiers,note,updated_by,updated_at)
+           VALUES ($1,$2,$3,$4,$5)
+           ON CONFLICT (country_code) DO UPDATE SET soldiers=EXCLUDED.soldiers,
+             note=EXCLUDED.note, updated_by=EXCLUDED.updated_by, updated_at=EXCLUDED.updated_at`,
+    [cc, soldiers, note, req.user.id, Date.now()]);
+  res.json({ ok: true });
+}));
+function cleanWeapon(b) {
+  const out = {};
+  const cc = String(b.country_code || '').toUpperCase();
+  if (!validCountry(cc)) throw new Error('كود دولة غير صالح');
+  out.country_code = cc;
+  for (const k of ['name', 'class', 'wtype', 'model']) {
+    if (typeof b[k] !== 'string' || !b[k].trim()) throw new Error('أكمل بيانات السلاح');
+    out[k] = b[k].trim().slice(0, 160);
+  }
+  out.quantity = b.quantity == null || b.quantity === '' ? null : Math.max(0, parseInt(b.quantity, 10) || 0);
+  out.image_url = typeof b.image_url === 'string' && b.image_url.trim() ? b.image_url.trim().slice(0, 500) : null;
+  return out;
+}
+// إضافة سلاح — المطورون فقط
+app.post('/api/weapons', ah(auth), requireDeveloper, ah(async (req, res) => {
+  let w; try { w = cleanWeapon(req.body || {}); } catch (e) { return res.status(400).json({ error: e.message }); }
+  const r = await q(`INSERT INTO weapons (country_code,name,class,wtype,model,quantity,image_url,created_by,created_at)
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+    [w.country_code, w.name, w.class, w.wtype, w.model, w.quantity, w.image_url, req.user.id, Date.now()]);
+  res.json({ ok: true, id: r.rows[0].id });
+}));
+// تعديل سلاح — المطورون فقط
+app.put('/api/weapons/:id', ah(auth), requireDeveloper, ah(async (req, res) => {
+  let w; try { w = cleanWeapon(req.body || {}); } catch (e) { return res.status(400).json({ error: e.message }); }
+  await q(`UPDATE weapons SET country_code=$1,name=$2,class=$3,wtype=$4,model=$5,quantity=$6,image_url=$7
+           WHERE id=$8`, [w.country_code, w.name, w.class, w.wtype, w.model, w.quantity, w.image_url, req.params.id]);
+  res.json({ ok: true });
+}));
+// حذف سلاح — المطورون فقط
+app.delete('/api/weapons/:id', ah(auth), requireDeveloper, ah(async (req, res) => {
+  await q('DELETE FROM weapons WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
 }));
 
