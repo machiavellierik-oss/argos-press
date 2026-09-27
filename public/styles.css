@@ -544,6 +544,7 @@ button{font-family:inherit;cursor:pointer}
 .wdecl{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--hover);border-radius:12px}
 .wdecl-tx{flex:1;display:flex;flex-direction:column;gap:2px}
 .wdecl-tx time{font-size:.75rem;color:var(--muted)}
+.wdecl-occ{font-size:.8rem;color:#ff8a8a}
 
 /* ---------- محرر الخريطة (المطورون) ---------- */
 .dev-sec{border:1px solid var(--accent)}

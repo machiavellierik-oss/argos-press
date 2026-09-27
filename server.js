@@ -189,14 +189,22 @@ async function initDb() {
     country_code TEXT PRIMARY KEY, color TEXT, status TEXT,
     label TEXT, borders_geojson TEXT, updated_by INTEGER, updated_at BIGINT
   )`);
-  // إعلان حالة الحرب بين الولايات المتحدة وإسبانيا — يُزرع مرة واحدة فقط،
-  // ويمكن للمطورين تعديله/حذفه لاحقًا من محرر الخريطة
-  for (const cc of ['US', 'ES']) {
-    const ex = await one('SELECT country_code FROM map_states WHERE country_code=$1', [cc]);
+  // حروب يناير 1900 الحقيقية — تُزرع مرة واحدة فقط،
+  // ويمكن للمطورين تعديلها/حذفها لاحقًا من محرر الخريطة
+  const WAR_SEED = [
+    { cc: 'US', label: 'الحرب الأمريكية – الإسبانية' },
+    { cc: 'ES', label: 'الحرب الأمريكية – الإسبانية' },
+    { cc: 'GB', label: 'حرب البوير الثانية' },
+    { cc: 'TV', label: 'حرب البوير الثانية' },
+    { cc: 'OF', label: 'حرب البوير الثانية' },
+    { cc: 'CN', label: 'ثورة الملاكمين' },
+  ];
+  for (const w of WAR_SEED) {
+    const ex = await one('SELECT country_code FROM map_states WHERE country_code=$1', [w.cc]);
     if (!ex) await q(
       `INSERT INTO map_states (country_code,color,status,label,updated_by,updated_at)
-       VALUES ($1,'#f4212e','war','الحرب الأمريكية – الإسبانية',NULL,$2)`,
-      [cc, Date.now()]);
+       VALUES ($1,'#f4212e','war',$2,NULL,$3)`,
+      [w.cc, w.label, Date.now()]);
   }
   const n = await one('SELECT COUNT(*) AS c FROM articles');
   if (Number(n.c) === 0) {

@@ -480,6 +480,7 @@ async function vNews() {
             <span><i class="dot" style="background:#f4212e"></i>مرتفع</span>
             <span><i class="dot" style="background:#ff9f0a"></i>متوسط</span>
             <span><i class="dot" style="background:#ffd400"></i>منخفض</span>
+            <span><i class="dot" style="background:transparent;border:1.5px dashed #f4212e"></i>أراضٍ محتلة</span>
             <span class="hint">لون حدود كل دولة = حالتها</span>
           </div>
         </div>
@@ -675,6 +676,30 @@ function initGlobe3D(cv, rows, mstates) {
         globe.add(buildCustomLines(JSON.parse(s.borders_geojson), 1.004, parseInt(col.slice(1), 16), 0.95));
       } catch (e) {}
     });
+    // الأراضي المحتلة: تُرسم بخط أحمر متقطع عندما يكون المحتل في حالة حرب/طوارئ
+    const OCC = (typeof OCCUPIED_TERRITORIES !== 'undefined') ? OCCUPIED_TERRITORIES : [];
+    const occByOccupier = {};
+    OCC.forEach((t) => { (occByOccupier[t.occupier] = occByOccupier[t.occupier] || []).push(t); });
+    (mstates || []).forEach((s) => {
+      if (s.status !== 'war' && s.status !== 'emergency') return;
+      const list = occByOccupier[s.country_code] || [];
+      if (!list.length) return;
+      const col = s.status === 'war' ? 0xf4212e : 0xff9f0a;
+      list.forEach((t) => {
+        try {
+          let geom = t.geom;
+          if (!geom && t.ref) {
+            const f = data.features.find((x) => x.properties && x.properties.NAME === t.ref);
+            if (f) geom = f.geometry;
+          }
+          if (!geom) return;
+          const lines = buildCustomLines(geom, 1.005, col, 1);
+          lines.material = new THREE.LineDashedMaterial({ color: col, dashSize: 0.02, gapSize: 0.012, transparent: true, opacity: 1 });
+          lines.computeLineDistances();
+          globe.add(lines);
+        } catch (e) {}
+      });
+    });
   }).catch(() => {});
   // علامات الدول المشتعلة
   const SEVC = { RED: 0xf4212e, ORANGE: 0xff9f0a, YELLOW: 0xffd400 };
@@ -843,8 +868,11 @@ function renderDeclarations(mstates) {
   if (!list.length) { el.innerHTML = '<div class="empty">لا توجد إعلانات حالية.</div>'; return; }
   el.innerHTML = '<div class="wdecl-list">' + list.map((s) => {
     const c = countryOf(s.country_code);
+    const occ = (typeof OCCUPIED_TERRITORIES !== 'undefined') ? OCCUPIED_TERRITORIES.filter((t) => t.occupier === s.country_code) : [];
+    const occLine = (occ.length && (s.status === 'war' || s.status === 'emergency'))
+      ? `<div class="wdecl-occ">الأراضي المحتلة: ${occ.map((t) => esc(t.name)).join('، ')}</div>` : '';
     return `<div class="wdecl"><span class="war-flag">${c.flag}</span>
-      <div class="wdecl-tx"><b>${esc(c.name)}</b>${s.label ? `<span> — ${esc(s.label)}</span>` : ''}
+      <div class="wdecl-tx"><b>${esc(c.name)}</b>${s.label ? `<span> — ${esc(s.label)}</span>` : ''}${occLine}
       <time>${s.updated_at ? new Date(s.updated_at).toLocaleDateString('ar-EG') : ''}</time></div>
       <span class="st-badge st-${s.status}">${MAP_ST_AR[s.status]}</span></div>`;
   }).join('') + '</div>';
