@@ -73,6 +73,20 @@ const ICONS = {
 
 // ---------- أدوات ----------
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// تنبيه عائم بسيط — كان مستخدمًا في عدة مواضع دون تعريف (يسبب ReferenceError)
+function toast(msg) {
+  let t = document.getElementById('toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'toast';
+    t.style.cssText = 'position:fixed;bottom:76px;left:50%;transform:translateX(-50%);background:#1c2333;color:#fff;padding:10px 18px;border-radius:10px;font-size:14px;z-index:9999;opacity:0;transition:opacity .25s;max-width:90vw;text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.4)';
+    document.body.appendChild(t);
+  }
+  t.textContent = String(msg ?? '');
+  t.style.opacity = '1';
+  clearTimeout(t._tm);
+  t._tm = setTimeout(() => { t.style.opacity = '0'; }, 2600);
+}
 function timeAgo(ts) {
   const s = Math.floor((Date.now() - ts) / 1000);
   if (s < 60) return 'الآن';
@@ -146,7 +160,7 @@ async function hydrateEngagement(type) {
 // ---------- القائمة الجانبية (درج بأقسام) والودجت ----------
 const NAV_SECTIONS = [
   { t: '', links: [['#/', 'الرئيسية', 'home']] },
-  { t: 'الحرب', links: [['#/news', 'غرفة الحرب', 'globe']] },
+  { t: 'الحرب', links: [['#/news', 'غرفة الحرب', 'globe'], ['#/wars', 'الحروب', 'swords'], ['#/diplomacy', 'الدبلوماسية', 'doc'], ['#/intel', 'الاستخبارات', 'search']] },
   { t: 'الاقتصاد', links: [['#/economy', 'الاقتصاد والسكان', 'coin']] },
   { t: 'التجارة', links: [['#/market', 'السوق العام', 'swords']] },
   { t: 'الإعلام', links: [
@@ -1055,6 +1069,23 @@ async function vEconomyDetail(code) {
       <div class="field"><label>ملاحظة</label><div class="hint" style="margin:0">تُخصم منها تلقائيًا تكاليف تأسيس الشركات والمشتريات العسكرية.</div></div>
     </div>
     ${e && e.liquidity_note ? `<p class="hint">${esc(e.liquidity_note)}</p>` : ''}`;
+  // مقياس أفقي بسيط للمؤشرات السياسية (0-100 ما لم يُذكر خلافه)
+  const meter = (lbl, v, suffix = '%', max = 100) => {
+    const n = Math.max(0, Math.min(max, Number(v) || 0));
+    const w = n / max, col = w >= 0.6 ? '#3fae5a' : w >= 0.4 ? '#d9a13b' : '#d64545';
+    return `<div class="field"><label>${lbl}</label>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="flex:1;height:8px;border-radius:6px;background:#22303e;overflow:hidden"><div style="height:100%;width:${(w * 100).toFixed(0)}%;background:${col}"></div></div>
+        <b dir="ltr" style="min-width:52px;text-align:left">${Math.round(n * 10) / 10}${suffix}</b>
+      </div></div>`;
+  };
+  const polBox = `<div class="map-ed">
+      ${meter('الاستقرار السياسي', d.stability)}
+      ${meter('الدعم الشعبي', d.public_support)}
+      ${meter('التضخم السنوي', d.inflation, '%', 30)}
+      ${meter('السمعة الدبلوماسية', d.reputation)}
+    </div>
+    <p class="hint">الثورة تندلع عند انهيار الاستقرار (0) وتنتهي بتجاوزه 40 — الضرائب المرتفعة والحروب تضغط عليه تدريجيًا كل شهر لعبة.</p>`;
   const coBadge = (o) => `<span class="co-badge ${o.ctype}">${o.ctype === 'international' ? 'دولية' : 'وطنية'}</span>`
     + (o.status === 'pending' ? ' <span class="co-badge pend">بانتظار الموافقة</span>'
       : o.status === 'rejected' ? ' <span class="co-badge rej">مرفوضة</span>' : '');
@@ -1094,16 +1125,18 @@ async function vEconomyDetail(code) {
       ${e && e.pop_source ? `<p class="hint"><a href="${esc(e.pop_source)}" target="_blank" rel="noopener" class="wpn-src">مصدر السكان</a>${e.gdp_source ? ` · <a href="${esc(e.gdp_source)}" target="_blank" rel="noopener" class="wpn-src">مصدر الناتج</a>` : ''}</p>` : ''}</div></div>
     <div class="war-sec"><div class="war-sec-t">${ICONS.coin} العملة الوطنية</div>${rateBox}</div>
     <div class="war-sec"><div class="war-sec-t">${ICONS.coin} السيولة المتوفرة</div>${liqBox}</div>
-    ${d.revolt_active ? `<div class="revolt-banner">ثورة شعبية — عصيان مدني! الشعب غاضب من الضرائب المرتفعة. اخفض النسبة إلى 30% أو أقل لإنهاء الثورة واستئناف الجباية.</div>` : ''}
+    <div class="war-sec"><div class="war-sec-t">${ICONS.shield} الاستقرار السياسي</div>${polBox}</div>
+    ${d.revolt_active ? `<div class="revolt-banner">ثورة شعبية — عصيان مدني! اخفض الضرائب وحسّن الأوضاع حتى يتجاوز الاستقرار 40 — الثورة الآن مرتبطة بانهيار الاستقرار لا بعتبة ضريبية.</div>` : ''}
     ${mine ? `<div class="war-sec"><div class="war-sec-t">الضرائب</div>
       <div class="map-ed">
-        <div class="field"><label>نسبة الضريبة الحالية</label><div class="stat-v" style="font-size:20px">${d.tax_rate}%</div></div>
+        <div class="field"><label>نسبة الضريبة الحالية</label><div class="stat-v" id="tax-cur" style="font-size:20px">${d.tax_rate}%</div></div>
         <div class="field"><label>تحديد النسبة (0 – 100)</label><input id="tax-rate" type="number" min="0" max="100" step="any" value="${d.tax_rate}" dir="ltr"></div>
       </div>
       <div class="me-btns" style="margin-top:8px">
         <button class="btn sm" onclick="taxSave('${code}')">حفظ النسبة</button>
         <button class="btn sm" ${d.can_collect ? '' : 'disabled'} onclick="taxCollect('${code}')">جباية شهرية (+${fmtRate(d.collect_amount)} مليون $)</button>
       </div>
+      <p class="hint" id="tax-pressure" style="margin-top:6px"></p>
       <p class="hint">الجباية مرة واحدة كل شهر لعبة (ساعتان حقيقيتان). المبلغ = الناتج السنوي × النسبة ÷ 12. أثناء الثورة تتوقف الجباية.</p>
     </div>` : `<div class="war-sec"><div class="war-sec-t">الضرائب</div><p class="hint">نسبة الضريبة الحالية: <b>${d.tax_rate}%</b></p></div>`}
     <div class="war-sec"><div class="war-sec-t">الموارد الطبيعية والاحتياطيات</div>
@@ -1244,10 +1277,16 @@ async function coCollect(id) {
 }
 async function taxSave(code) {
   const v = document.getElementById('tax-rate').value;
+  const hintEl = () => document.getElementById('tax-pressure');
   try {
-    await api('PUT', '/economy/' + code, { tax_rate: v });
-    toast('تم حفظ نسبة الضريبة'); vEconomyDetail(code);
-  } catch (e) { toast(e.message || 'فشل الحفظ'); }
+    const r = await api('PUT', '/economy/' + code, { tax_rate: v });
+    if (r.tax_rate != null) {
+      const cur = document.getElementById('tax-cur');
+      if (cur) cur.textContent = r.tax_rate + '%';
+      document.getElementById('tax-rate').value = r.tax_rate;
+    }
+    if (hintEl()) hintEl().innerHTML = `تم الحفظ — <b>الضغط الضريبي:</b> ${esc(r.pressure || '—')}`;
+  } catch (e) { if (hintEl()) hintEl().textContent = e.message || 'فشل الحفظ'; }
 }
 async function taxCollect(code) {
   try {
@@ -2424,11 +2463,267 @@ async function vUser(username) {
   } catch (e) { app.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 
+// ---------- الحروب ----------
+async function vWars() {
+  app.innerHTML = thead('الحروب') + '<div id="warbody"><div class="spin"></div></div>';
+  let d;
+  try { d = await api('GET', '/wars'); }
+  catch (e) { document.getElementById('warbody').innerHTML = `<div class="empty">${esc(e.message || 'تعذر التحميل')}</div>`; return; }
+  const wars = d.wars || [];
+  const myCC = me && me.country_code;
+  const mine = (w) => myCC && (w.attacker_code === myCC || w.defender_code === myCC);
+  const card = (w) => {
+    const a = countryOf(w.attacker_code), df = countryOf(w.defender_code);
+    const active = w.status === 'active';
+    return `<div class="wpn-card"><div class="wpn-tx">
+      <b>${a.flag} ${esc(w.attacker_name)} <span class="hint">ضد</span> ${df.flag} ${esc(w.defender_name)}</b>
+      <span class="co-badge ${active ? 'rej' : ''}">${active ? 'نشطة' : 'منتهية'}</span>
+      <span>نقاط الحرب: <b dir="ltr">${w.score_a} : ${w.score_b}</b></span>
+      <span class="me-btns">
+        <button class="btn ghost sm" onclick="warBattles(${w.id})">تفاصيل/معارك</button>
+        ${active && mine(w) ? `<button class="btn sm" onclick="warBattle(${w.id})">شن معركة</button>
+        <button class="btn ghost sm" onclick="warPeace(${w.id})">سلام</button>` : ''}
+      </span>
+      <div id="wb-${w.id}"></div>
+    </div></div>`;
+  };
+  const declareBox = myCC ? `<div class="war-sec"><div class="war-sec-t">${ICONS.swords} إعلان حرب</div>
+      <div class="map-ed"><div class="field"><label>الدولة المستهدفة</label>
+        <select id="war-target">${COUNTRIES.filter((c) => c.code !== myCC).map((c) => `<option value="${c.code}">${c.flag} ${c.name}</option>`).join('')}</select>
+      </div></div>
+      <p class="hint">${ICONS.alert} تحذير: إعلان الحرب يكسر تلقائيًا مواثيق عدم الاعتداء والتحالفات مع الهدف، ويخفض الاستقرار والدعم الشعبي لدولتك.</p>
+      <div class="me-btns"><button class="btn sm" onclick="warDeclare()">إعلان الحرب</button></div>
+    </div>` : '<p class="hint">إعلان الحروب وشن المعارك لأصحاب الدول فقط.</p>';
+  document.getElementById('warbody').innerHTML = declareBox
+    + `<div class="war-sec"><div class="war-sec-t">${ICONS.swords} الحروب (${wars.length})</div>
+      ${wars.length ? '<div class="wpn-grid">' + wars.map(card).join('') + '</div>' : '<div class="empty">لا حروب مسجلة — العالم يعيش سلامًا هشًا.</div>'}
+    </div>`;
+}
+async function warBattles(id) {
+  const box = document.getElementById('wb-' + id);
+  if (!box) return;
+  if (box.dataset.open === '1') { box.innerHTML = ''; box.dataset.open = ''; return; }
+  box.innerHTML = '<div class="spin"></div>';
+  try {
+    const d = await api('GET', '/wars/' + id);
+    const bs = d.battles || [];
+    box.dataset.open = '1';
+    box.innerHTML = bs.length ? '<div class="liq-log">' + bs.map((b) =>
+      `<div class="liq-row"><span class="liq-rs"><b>${esc(b.winner_name || '')}</b>${b.region ? ' · ' + esc(b.region) : ''}
+        <br><span class="hint">القوة <span dir="ltr">${fmtPop(b.att_units)}/${fmtPop(b.def_units)}</span> · الخسائر <span dir="ltr">${fmtPop(b.att_losses)}/${fmtPop(b.def_losses)}</span></span></span>
+      </div>`).join('') + '</div>'
+      : '<p class="hint">لا معارك مسجلة بعد في هذه الحرب.</p>';
+  } catch (e) { box.innerHTML = `<p class="hint">${esc(e.message)}</p>`; }
+}
+async function warDeclare() {
+  const t = document.getElementById('war-target').value;
+  const tn = countryOf(t).name;
+  if (!confirm(`إعلان الحرب على ${tn}؟ هذا يكسر مواثيقك معها ويخفض استقرار دولتك.`)) return;
+  try { await api('POST', '/war/declare', { target_code: t }); alert('أُعلنت الحرب'); vWars(); }
+  catch (e) { alert(e.message); }
+}
+async function warBattle(id) {
+  const u = prompt('عدد جنود الهجوم (1000 على الأقل):');
+  if (u == null) return;
+  const units = parseInt(u, 10);
+  if (!(units >= 1000)) { alert('أقل قوة هجوم لمعركة: 1000 جندي'); return; }
+  try {
+    const r = await api('POST', '/war/battle', { war_id: id, units });
+    alert(`انتهت المعركة — المنتصر: ${r.winner_name}\nخسائر المهاجم ${fmtPop(r.att_losses)} · خسائر المدافع ${fmtPop(r.def_losses)}\nالنقاط: ${r.score_a} : ${r.score_b}`);
+    vWars();
+  } catch (e) { alert(e.message); }
+}
+async function warPeace(id) {
+  if (!confirm('طلب السلام في هذه الحرب؟ (تفاوضي بموافقة الطرفين، أو مفروض مع تعويضات عند تفوق ساحق)')) return;
+  try {
+    const r = await api('POST', '/war/peace', { war_id: id });
+    if (r.enforced) alert(`سلام مفروض! المنتصر: ${r.winner_name} — تعويضات ${fmtRate(r.reparations)} مليون $`);
+    else if (r.negotiated) alert('تم السلام التفاوضي');
+    else alert('أُرسل عرض السلام للطرف الآخر — بانتظار قبوله');
+    vWars();
+  } catch (e) { alert(e.message); }
+}
+
+// ---------- الدبلوماسية ----------
+const TREATY_OPTS = [
+  ['non_aggression', 'ميثاق عدم اعتداء'], ['alliance', 'تحالف عسكري'], ['defensive', 'تحالف دفاعي'],
+  ['trade', 'اتفاقية تجارية'], ['military_access', 'حق العبور العسكري'], ['embargo', 'حظر تجاري'], ['peace', 'معاهدة سلام'],
+];
+async function vDiplomacy() {
+  if (!me) { location.hash = '#/login'; return; }
+  const myCC = me.country_code;
+  app.innerHTML = thead('الدبلوماسية') + '<div id="dipbody"><div class="spin"></div></div>';
+  let d, rep = null;
+  try {
+    d = await api('GET', '/treaties');
+    if (myCC) { try { rep = (await api('GET', '/treaties/' + myCC)).reputation; } catch (x) {} }
+  } catch (e) { document.getElementById('dipbody').innerHTML = `<div class="empty">${esc(e.message || 'تعذر التحميل')}</div>`; return; }
+  const ts = d.treaties || [];
+  const tCard = (t, btns) => `<div class="wpn-card"><div class="wpn-tx">
+      <b>${esc(t.type_label || t.type)}</b> ${t.secret ? `<span class="co-badge">${ICONS.lock} سرية</span>` : ''}
+      <span>${esc(t.from_name || '')} ${countryOf(t.from_code).flag} ←→ ${countryOf(t.to_code).flag} ${esc(t.to_name || '')}</span>
+      <span class="hint">الحالة: ${t.status === 'active' ? 'نشطة' : t.status === 'proposed' ? 'مقترحة' : esc(t.status)}</span>
+      ${btns ? `<span class="me-btns">${btns}</span>` : ''}
+    </div></div>`;
+  const incoming = myCC ? ts.filter((t) => t.status === 'proposed' && t.to_code === myCC) : [];
+  const outgoing = myCC ? ts.filter((t) => t.status === 'proposed' && t.from_code === myCC) : [];
+  const active = myCC ? ts.filter((t) => t.status === 'active' && (t.from_code === myCC || t.to_code === myCC)) : [];
+  document.getElementById('dipbody').innerHTML = `
+    ${myCC && rep != null ? `<div class="war-sec"><div class="war-sec-t">${ICONS.doc} سمعتك الدبلوماسية</div>
+      <div class="map-ed"><div class="field"><label>السمعة (من 100)</label><div class="stat-v" style="font-size:20px">${rep}</div></div></div>
+      <p class="hint">كسر المعاهدات يخصم 20 نقطة. الانكشاف في عمليات تجسس يخصم 5.</p></div>` : ''}
+    ${incoming.length ? `<div class="war-sec"><div class="war-sec-t">${ICONS.bell} مقترحات واردة (${incoming.length})</div>
+      <div class="wpn-grid">${incoming.map((t) => tCard(t,
+        `<button class="btn sm" onclick="treatyAccept(${t.id})">قبول</button><button class="btn ghost sm" onclick="treatyReject(${t.id})">رفض</button>`)).join('')}</div></div>` : ''}
+    ${active.length ? `<div class="war-sec"><div class="war-sec-t">${ICONS.shield} معاهداتي النشطة (${active.length})</div>
+      <div class="wpn-grid">${active.map((t) => tCard(t,
+        `<button class="btn ghost sm" onclick="treatyBreak(${t.id})">كسر المعاهدة</button>`)).join('')}</div></div>` : ''}
+    ${outgoing.length ? `<div class="war-sec"><div class="war-sec-t">${ICONS.send} مقترحاتي المعلقة (${outgoing.length})</div>
+      <div class="wpn-grid">${outgoing.map((t) => tCard(t, '')).join('')}</div></div>` : ''}
+    ${!incoming.length && !active.length && !outgoing.length ? '<div class="empty">لا معاهدات بعد — اقترح أول معاهدة لك.</div>' : ''}
+    ${myCC ? `<div class="war-sec"><div class="war-sec-t">${ICONS.doc} اقتراح معاهدة جديدة</div>
+      <div class="map-ed">
+        <div class="field"><label>الدولة</label><select id="tr-to">${COUNTRIES.filter((c) => c.code !== myCC).map((c) => `<option value="${c.code}">${c.flag} ${c.name}</option>`).join('')}</select></div>
+        <div class="field"><label>النوع</label><select id="tr-type">${TREATY_OPTS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div>
+        <div class="field"><label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="tr-secret"> معاهدة سرية (لا يراها إلا الطرفان)</label></div>
+      </div>
+      <div class="me-btns"><button class="btn sm" onclick="treatyPropose()">إرسال الاقتراح</button></div>
+    </div>` : '<p class="hint">اقتراح المعاهدات لأصحاب الدول فقط.</p>'}`;
+}
+async function treatyPropose() {
+  try {
+    await api('POST', '/treaties/propose', {
+      to_code: val('tr-to'), type: document.getElementById('tr-type').value,
+      secret: document.getElementById('tr-secret').checked,
+    });
+    alert('أُرسل الاقتراح للدولة الأخرى'); vDiplomacy();
+  } catch (e) { alert(e.message); }
+}
+async function treatyAccept(id) {
+  try { await api('POST', '/treaties/' + id + '/accept'); alert('تم قبول المعاهدة'); vDiplomacy(); }
+  catch (e) { alert(e.message); }
+}
+async function treatyReject(id) {
+  if (!confirm('رفض هذه المعاهدة؟')) return;
+  try { await api('POST', '/treaties/' + id + '/reject'); vDiplomacy(); }
+  catch (e) { alert(e.message); }
+}
+async function treatyBreak(id) {
+  if (!confirm('كسر هذه المعاهدة؟ تحذير: ستخسر 20 نقطة من سمعتك الدبلوماسية.')) return;
+  try { await api('POST', '/treaties/' + id + '/break'); alert('كُسرت المعاهدة — خسرت 20 نقطة سمعة'); vDiplomacy(); }
+  catch (e) { alert(e.message); }
+}
+
+// ---------- الاستخبارات ----------
+const INTEL_OPTS = [
+  ['military', 'عسكري — 60 مليون $'], ['economy', 'اقتصادي — 40 مليون $'], ['stability', 'سياسي — 30 مليون $'],
+];
+const _rangeLine = (lbl, v) => {
+  if (v == null) return '';
+  if (typeof v === 'object') return `<span>${lbl}: <b dir="ltr">${fmtPop(v.low)} – ${fmtPop(v.estimate)} – ${fmtPop(v.high)}</b></span>`;
+  return `<span>${lbl}: <b>${esc(String(v))}</b></span>`;
+};
+const _repCard = (r) => {
+  const tc = countryOf(r.target_code);
+  const dt = r.data || {};
+  return `<div class="wpn-card"><div class="wpn-tx">
+    <b>${tc.flag} ${esc(r.target_name || tc.name)}</b> <span class="co-badge">${esc(r.kind_label || r.kind || '')}</span>
+    <span class="hint">الثقة: ${esc(r.confidence || '—')}</span>
+    ${_rangeLine('الجنود', dt.soldiers)}${_rangeLine('الجاهزية', dt.readiness)}${_rangeLine('المعنويات', dt.morale)}
+    ${_rangeLine('السيولة (مليون $)', dt.liquidity_m_usd)}${_rangeLine('الضريبة %', dt.tax_rate)}
+    ${_rangeLine('الاستقرار', dt.stability)}${_rangeLine('الدعم الشعبي', dt.public_support)}${_rangeLine('خطر الثورة', dt.revolt_risk)}
+    <span class="hint">تنتهي صلاحية التقرير بعد 3 أشهر لعبة.</span>
+  </div></div>`;
+};
+async function vIntel() {
+  if (!me) { location.hash = '#/login'; return; }
+  const myCC = me.country_code;
+  if (!myCC) { app.innerHTML = thead('الاستخبارات') + '<div class="empty">الاستخبارات لأصحاب الدول فقط.</div>'; return; }
+  app.innerHTML = thead('الاستخبارات') + '<div id="intelbody"><div class="spin"></div></div>';
+  let st, reps;
+  try {
+    [st, reps] = await Promise.all([api('GET', '/intel/status'), api('GET', '/intel/reports')]);
+  } catch (e) { document.getElementById('intelbody').innerHTML = `<div class="empty">${esc(e.message || 'تعذر التحميل')}</div>`; return; }
+  const attempts = st.attempts || [];
+  const reports = reps.reports || [];
+  document.getElementById('intelbody').innerHTML = `
+    <div class="war-sec"><div class="war-sec-t">${ICONS.shield} الأمن المضاد</div>
+      <div class="map-ed"><div class="field"><label>مستواك الأمني الحالي: <b>${st.level}/100</b></label>
+        <input id="sec-level" type="number" min="0" max="100" value="${st.level}" dir="ltr"></div></div>
+      <p class="hint">التكلفة: 1 مليون $ لكل نقطة فوق مستواك الحالي. الأمن الأعلى يكشف جواسيس العدو — والانكشاف فضيحة تخصم 5 نقاط سمعة.</p>
+      <div class="me-btns"><button class="btn sm" onclick="intelSecurity()">رفع المستوى</button></div>
+    </div>
+    ${attempts.length ? `<div class="war-sec"><div class="war-sec-t">${ICONS.alert} محاولات مكتشفة ضدك (${attempts.length})</div>
+      <div class="liq-log">${attempts.map((a) => `<div class="liq-row"><span class="liq-rs"><b>${esc(a.spy_name || a.spy_code)}</b> · ${esc(a.kind_label || '')}</span></div>`).join('')}</div></div>` : ''}
+    <div class="war-sec"><div class="war-sec-t">${ICONS.search} عملية تجسس جديدة</div>
+      <div class="map-ed">
+        <div class="field"><label>الدولة المستهدفة</label><select id="spy-target">${COUNTRIES.filter((c) => c.code !== myCC).map((c) => `<option value="${c.code}">${c.flag} ${c.name}</option>`).join('')}</select></div>
+        <div class="field"><label>نوع العملية</label><select id="spy-kind">${INTEL_OPTS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div>
+      </div>
+      <p class="hint">عملية واحدة لكل هدف شهريًا (زمن اللعبة). النجاح غير مضمون — والفوضى تساعد الجواسيس.</p>
+      <div class="me-btns"><button class="btn sm" onclick="intelSpy()">تنفيذ العملية</button></div>
+      <div id="spy-result"></div>
+    </div>
+    <div class="war-sec"><div class="war-sec-t">${ICONS.folder} تقاريري الاستخبارية (${reports.length})</div>
+      ${reports.length ? '<div class="wpn-grid">' + reports.map(_repCard).join('') + '</div>' : '<div class="empty">لا تقارير بعد — نفّذ عمليتك الأولى.</div>'}
+    </div>`;
+}
+async function intelSpy() {
+  const box = document.getElementById('spy-result');
+  if (!box) return;
+  box.innerHTML = '<div class="spin"></div>';
+  try {
+    const r = await api('POST', '/intel/spy', { target_code: val('spy-target'), kind: document.getElementById('spy-kind').value });
+    let h = `<div class="wpn-card" style="margin-top:10px"><div class="wpn-tx">
+      <b>${r.success ? 'نجحت العملية' : 'فشلت العملية'}</b>
+      <span class="co-badge ${r.success ? '' : 'rej'}">${r.success ? 'نجاح' : 'فشل'}</span>
+      ${r.detected ? `<span class="co-badge rej">${ICONS.alert} انكشفنا! -5 سمعة</span>` : ''}
+      <span>التكلفة: ${fmtRate(r.cost)} مليون $</span>`;
+    if (r.success && r.report) {
+      h += `<span class="hint">الثقة: ${esc(r.report.confidence || '—')} — الأرقام تقديرات بنطاق ثقة وليست دقيقة</span>`;
+      const dt = r.report.data || {};
+      h += _rangeLine('الجنود', dt.soldiers) + _rangeLine('الجاهزية', dt.readiness) + _rangeLine('المعنويات', dt.morale)
+        + _rangeLine('السيولة (مليون $)', dt.liquidity_m_usd) + _rangeLine('الضريبة %', dt.tax_rate)
+        + _rangeLine('الاستقرار', dt.stability) + _rangeLine('الدعم الشعبي', dt.public_support) + _rangeLine('خطر الثورة', dt.revolt_risk);
+    } else {
+      h += `<span class="hint">${esc(r.note || '')}</span>`;
+    }
+    box.innerHTML = h + '</div></div>';
+  } catch (e) { box.innerHTML = `<p class="hint">${esc(e.message)}</p>`; }
+}
+async function intelSecurity() {
+  const lvl = parseInt(document.getElementById('sec-level').value, 10);
+  if (!(lvl >= 0 && lvl <= 100)) { alert('المستوى بين 0 و 100'); return; }
+  try {
+    const r = await api('POST', '/intel/security', { level: lvl });
+    alert(r.cost ? `رُفع الأمن إلى ${r.level} — التكلفة ${fmtRate(r.cost)} مليون $` : 'المستوى الحالي مساوٍ أو أعلى — لا تكلفة');
+    vIntel();
+  } catch (e) { alert(e.message); }
+}
+
+// ---------- سجل التدقيق (مطورون) ----------
+async function vAudit() {
+  if (!me || me.role !== 'developer') { location.hash = '#/'; return; }
+  app.innerHTML = thead('سجل التدقيق') + '<div id="auditbody"><div class="spin"></div></div>';
+  try {
+    const d = await api('GET', '/admin/audit?limit=100');
+    const rows = d.audit || [];
+    document.getElementById('auditbody').innerHTML = rows.length
+      ? '<div class="liq-log">' + rows.map((a) =>
+        `<div class="liq-row"><span class="liq-amt">${esc(String(a.id))}</span>
+          <span class="liq-rs"><b>${esc(a.action || '')}</b> · ${esc(a.actor || '—')}
+          ${a.details ? `<br><span class="hint">${esc(a.details)}</span>` : ''}
+          <br><time>${new Date(a.created_at).toLocaleString('ar-EG')}</time></span>
+        </div>`).join('') + '</div>'
+      : '<div class="empty">لا سجلات تدقيق بعد.</div>';
+  } catch (e) { document.getElementById('auditbody').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
 // ---------- التوجيه ----------
 function navKey(h) {
   if (h === '#/' || h === '') return '#/';
   if (h.startsWith('#/cat/')) return '#/cat/' + h.split('/')[2];
-  if (h === '#/dispatches' || h === '#/dossiers' || h === '#/news' || h === '#/economy' || h === '#/market' || h === '#/notifications' || h === '#/dash' || h === '#/login' || h === '#/messages') return h;
+  if (h === '#/dispatches' || h === '#/dossiers' || h === '#/news' || h === '#/wars' || h === '#/diplomacy' || h === '#/intel' || h === '#/audit' || h === '#/economy' || h === '#/market' || h === '#/notifications' || h === '#/dash' || h === '#/login' || h === '#/messages') return h;
   if (h.startsWith('#/economy/')) return '#/economy';
   if (h.startsWith('#/messages/')) return '#/messages';
   if (h.startsWith('#/d/')) return '#/dispatches';
@@ -2449,6 +2744,10 @@ async function route() {
     else if (h === '#/dispatches') await vDispatches();
     else if (h === '#/dossiers') await vDossiers();
     else if (h === '#/news') await vNews();
+    else if (h === '#/wars') await vWars();
+    else if (h === '#/diplomacy') await vDiplomacy();
+    else if (h === '#/intel') await vIntel();
+    else if (h === '#/audit') await vAudit();
     else if (h === '#/economy') await vEconomy();
     else if (h.startsWith('#/economy/')) await vEconomyDetail(h.split('/')[2]);
     else if (h === '#/market') await vMarket();

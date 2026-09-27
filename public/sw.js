@@ -1,5 +1,5 @@
 // Service Worker لجريدة أرجوس — تخزين مؤقت للملفات الثابتة فقط
-const CACHE = 'argos-v17';
+const CACHE = 'argos-v18';
 const STATIC = [
   '/',
   '/index.html',
