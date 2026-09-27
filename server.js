@@ -3934,7 +3934,7 @@ const LLM_PROVIDERS = {
   groq: { name: 'Groq (مجاني بحدود — مفتاح مجاني)', url: 'https://api.groq.com/openai/v1/chat/completions',
     keyRequired: true, defaultModel: 'llama-3.3-70b-versatile', jsonMode: true },
   gemini: { name: 'Gemini (مجاني بحدود — مفتاح مجاني)', url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
-    keyRequired: true, defaultModel: 'gemini-2.5-flash', jsonMode: true },
+    keyRequired: true, defaultModel: 'gemini-3.6-flash', jsonMode: true },
   openrouter: { name: 'OpenRouter (مدفوع)', url: 'https://openrouter.ai/api/v1/chat/completions',
     keyRequired: true, defaultModel: 'meta-llama/llama-3.3-70b-instruct', jsonMode: true,
     extraHeaders: { 'HTTP-Referer': 'https://argos-press.game', 'X-Title': 'ARGOS AI Nations' } },
