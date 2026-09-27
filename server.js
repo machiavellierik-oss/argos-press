@@ -1018,42 +1018,37 @@ app.get('/api/military/:code', ah(auth), ah(async (req, res) => {
     readiness: band(a.readiness), morale: band(a.morale), training: band(a.training),
   });
 }));
-// إعلان حرب — صاحب الدولة المهاجمة أو المطورون
-app.post('/api/war/declare', ah(auth), ah(async (req, res) => {
-  const dev = isDeveloper(req.user);
-  const b = req.body || {};
-  const target = String(b.target_code || '').toUpperCase();
-  const attacker = dev && b.attacker_code ? String(b.attacker_code).toUpperCase() : req.user.country_code;
-  if (!validCountry(target) || !validCountry(attacker)) return res.status(400).json({ error: 'كود دولة غير صالح' });
-  if (!attacker) return res.status(400).json({ error: 'تحتاج دولة لإعلان الحرب' });
-  if (attacker === target) return res.status(400).json({ error: 'لا يمكن إعلان الحرب على نفسك' });
-  if (!dev && req.user.country_code !== attacker) return res.status(403).json({ error: 'غير مصرح' });
+// ============================================================================
+// محرك الحرب الداخلي — اللاعبون والدول الذكية يستخدمون نفس القواعد والقيم
+// ============================================================================
+// إعلان حرب — يرمي {status,message} عند الفشل
+async function declareWarInternal(attacker, target, actorUsername) {
+  if (!validCountry(target) || !validCountry(attacker)) throw { status: 400, message: 'كود دولة غير صالح' };
+  if (!attacker) throw { status: 400, message: 'تحتاج دولة لإعلان الحرب' };
+  if (attacker === target) throw { status: 400, message: 'لا يمكن إعلان الحرب على نفسك' };
   const ex = await activeWarBetween(attacker, target);
-  if (ex) return res.status(400).json({ error: 'حرب نشطة موجودة أصلًا بين الدولتين' });
-  // كسر المواثيق: إعلان الحرب على شريك ميثاق/تحالف = كسر المعاهدة بثمن السمعة
+  if (ex) throw { status: 400, message: 'حرب نشطة موجودة أصلًا بين الدولتين' };
   for (const tt of ['non_aggression', 'alliance', 'defensive']) {
     const t = await activeTreaty(attacker, target, tt);
-    if (t) await breakTreaty(t, attacker, 'إعلان الحرب', req);
+    if (t) await breakTreaty(t, attacker, 'إعلان الحرب', { user: { username: actorUsername } });
   }
   const mil = await getArmy(attacker);
-  if (mil.soldiers < 1000) return res.status(400).json({ error: 'جيشك أصغر من أن يشن حربًا (أقل من 1000 جندي)' });
+  if (mil.soldiers < 1000) throw { status: 400, message: 'جيشك أصغر من أن يشن حربًا (أقل من 1000 جندي)' };
   const g = await gameNow();
   const r = await q(`INSERT INTO wars (attacker_code,defender_code,status,started_game_time,created_at)
                      VALUES ($1,$2,'active',$3,$4) RETURNING id`, [attacker, target, g, Date.now()]);
   const warId = r.rows[0].id;
   await setArmyStat(attacker, { readiness: Math.max(0, mil.readiness - 5), morale: Math.max(0, mil.morale - 3) });
-  // ثمن الحرب الداخلي: الاستقرار والدعم الشعبي ينخفضان
   await setEconStat(attacker, 'stability', Math.max(0, await getEconStat(attacker, 'stability', 70) - 3));
   await setEconStat(attacker, 'public_support', Math.max(0, await getEconStat(attacker, 'public_support', 60) - 5));
-  await setMapWarStatus(attacker, true, `حرب: ${cname(attacker)} ضد ${cname(target)}`, req.user.id);
-  await setMapWarStatus(target, true, `حرب: ${cname(attacker)} ضد ${cname(target)}`, req.user.id);
+  await setMapWarStatus(attacker, true, `حرب: ${cname(attacker)} ضد ${cname(target)}`, null);
+  await setMapWarStatus(target, true, `حرب: ${cname(attacker)} ضد ${cname(target)}`, null);
   await emitEvent('war_declared', attacker, target, `${cname(attacker)} تعلن الحرب على ${cname(target)}`, { war_id: warId });
-  await audit('war_declare', req.user.username, `${attacker} تعلن الحرب على ${target}`, req);
+  await audit('war_declare', actorUsername, `${attacker} تعلن الحرب على ${target}`);
   await notifyCountry(attacker, 'war', `أعلنت الحرب على ${cname(target)}!`,
     `بدأت الحرب ضد ${cname(target)}. كل معركة تستهلك الجاهزية والروح المعنوية — أدر جيشك بحكمة.`, '#/news');
   await notifyCountry(target, 'war', `${cname(attacker)} أعلنت الحرب عليك!`,
     `${cname(attacker)} أعلنت الحرب على دولتك. استعد للدفاع!`, '#/news');
-  // إخطار الحلفاء الدفاعيين للطرف المُهاجَم — التحالف الدفاعي يتيح لهم التدخل
   const allies = await all(`SELECT * FROM treaties WHERE status='active' AND type='defensive' AND (from_code=$1 OR to_code=$1)`, [target]);
   for (const al of allies) {
     const allyCC = al.from_code === target ? al.to_code : al.from_code;
@@ -1063,26 +1058,23 @@ app.post('/api/war/declare', ah(auth), ah(async (req, res) => {
   }
   await hqArticle(`عاجل: ${cname(attacker)} تعلن الحرب على ${cname(target)}`,
     `في تطور خطير، أعلنت ${cname(attacker)} الحرب رسميًا على ${cname(target)}. ترقبوا تغطية المعارك أولًا بأول في غرفة الحرب.`, 'wars');
-  res.json({ ok: true, war_id: warId });
-}));
-// معركة — المبادرة للمهاجم (أو المطورون)، والمدافع يدافع تلقائيًا بأفضلية التضاريس
-app.post('/api/war/battle', ah(auth), ah(async (req, res) => {
-  const dev = isDeveloper(req.user);
-  const b = req.body || {};
-  const w = await one('SELECT * FROM wars WHERE id=$1', [parseInt(b.war_id, 10) || 0]);
-  if (!w || w.status !== 'active') return res.status(404).json({ error: 'لا توجد حرب نشطة بهذا الرقم' });
-  if (!dev && req.user.country_code !== w.attacker_code)
-    return res.status(403).json({ error: 'غير مصرح — المبادرة بالمعارك للطرف المهاجم' });
+  return warId;
+}
+// معركة — attackerCC يجب أن يكون الطرف المهاجم في الحرب
+async function battleInternal(warId, attackerCC, units, region, actorUsername) {
+  const w = await one('SELECT * FROM wars WHERE id=$1', [parseInt(warId, 10) || 0]);
+  if (!w || w.status !== 'active') throw { status: 404, message: 'لا توجد حرب نشطة بهذا الرقم' };
+  if (w.attacker_code !== attackerCC) throw { status: 403, message: 'غير مصرح — المبادرة بالمعارك للطرف المهاجم' };
   const attMil = await getArmy(w.attacker_code);
   const defMil = await getArmy(w.defender_code);
-  const units = parseInt(b.units, 10) || 0;
+  units = parseInt(units, 10) || 0;
   const maxUnits = Math.floor(attMil.soldiers * 0.5);
-  if (!(units >= 1000)) return res.status(400).json({ error: 'أقل قوة هجوم لمعركة: 1000 جندي' });
-  if (units > maxUnits) return res.status(400).json({ error: `أقصى قوة لمعركة واحدة: ${maxUnits.toLocaleString('en-US')} جندي (50% من الجيش)` });
-  const region = String(b.region || '').slice(0, 60);
+  if (!(units >= 1000)) throw { status: 400, message: 'أقل قوة هجوم لمعركة: 1000 جندي' };
+  if (units > maxUnits) throw { status: 400, message: `أقصى قوة لمعركة واحدة: ${maxUnits.toLocaleString('en-US')} جندي (50% من الجيش)` };
+  region = String(region || '').slice(0, 60);
   const defUnits = Math.max(500, Math.round(Math.min(defMil.soldiers * 0.6, units * (0.9 + Math.random() * 0.3))));
   const attP = battlePower(units, attMil);
-  const defP = battlePower(defUnits, defMil) * 1.1; // أفضلية الدفاع والتضاريس
+  const defP = battlePower(defUnits, defMil) * 1.1;
   const attWins = attP >= defP;
   const winner = attWins ? 'attacker' : 'defender';
   const attLoss = Math.round(units * (attWins ? 0.05 + Math.random() * 0.05 : 0.15 + Math.random() * 0.10));
@@ -1112,26 +1104,19 @@ app.post('/api/war/battle', ah(auth), ah(async (req, res) => {
   await emitEvent('battle', w.attacker_code, w.defender_code,
     `معركة: ${wname} تنتصر${region ? ' في ' + region : ''} (خسائر المهاجم ${attLoss.toLocaleString('en-US')} / المدافع ${defLoss.toLocaleString('en-US')})`,
     { war_id: w.id, battle_id: br.rows[0].id });
-  await audit('war_battle', req.user.username, `معركة في حرب #${w.id}: ${units} ضد ${defUnits} — الفائز: ${wname}`, req);
+  await audit('war_battle', actorUsername, `معركة في حرب #${w.id}: ${units} ضد ${defUnits} — الفائز: ${wname}`);
   await notifyCountry(w.attacker_code, 'battle', attWins ? 'انتصار في المعركة!' : 'هزيمة في المعركة',
     `معركة ${region ? 'في ' + region : ''}: خسائرك ${attLoss.toLocaleString('en-US')} — خسائر العدو ${defLoss.toLocaleString('en-US')}. النقاط: ${nScoreA} مقابل ${nScoreB}.`, '#/news');
   await notifyCountry(w.defender_code, 'battle', attWins ? 'هزيمة في المعركة' : 'انتصار في المعركة!',
     `معركة ${region ? 'في ' + region : ''}: خسائرك ${defLoss.toLocaleString('en-US')} — خسائر العدو ${attLoss.toLocaleString('en-US')}. النقاط: ${nScoreB} مقابل ${nScoreA}.`, '#/news');
-  res.json({
-    ok: true, battle_id: br.rows[0].id, winner, winner_name: wname,
-    att_losses: attLoss, def_losses: defLoss, score_a: nScoreA, score_b: nScoreB,
-  });
-}));
-// السلام — تفاوضي بموافقة الطرفين، أو مفروض عند تفوق ساحق (فرق 50+ نقطة) مع تعويضات
-app.post('/api/war/peace', ah(auth), ah(async (req, res) => {
-  const dev = isDeveloper(req.user);
-  const b = req.body || {};
-  const w = await one('SELECT * FROM wars WHERE id=$1', [parseInt(b.war_id, 10) || 0]);
-  if (!w || w.status !== 'active') return res.status(404).json({ error: 'لا توجد حرب نشطة بهذا الرقم' });
-  const myCC = req.user.country_code;
-  if (!dev && myCC !== w.attacker_code && myCC !== w.defender_code)
-    return res.status(403).json({ error: 'غير مصرح' });
-  const meSide = myCC === w.attacker_code ? w.attacker_code : w.defender_code;
+  return { battle_id: br.rows[0].id, winner, winner_name: wname, att_losses: attLoss, def_losses: defLoss, score_a: nScoreA, score_b: nScoreB };
+}
+// سلام — يُرجع {enforced,winner,reparations} أو {negotiated} أو {proposed} — يرمي عند الفشل
+async function peaceInternal(warId, meCC, actorUsername, force) {
+  const w = await one('SELECT * FROM wars WHERE id=$1', [parseInt(warId, 10) || 0]);
+  if (!w || w.status !== 'active') throw { status: 404, message: 'لا توجد حرب نشطة بهذا الرقم' };
+  if (meCC !== w.attacker_code && meCC !== w.defender_code) throw { status: 403, message: 'غير مصرح' };
+  const meSide = meCC === w.attacker_code ? w.attacker_code : w.defender_code;
   const otherSide = meSide === w.attacker_code ? w.defender_code : w.attacker_code;
   const g = await gameNow();
   const diff = Number(w.score_a) - Number(w.score_b);
@@ -1142,7 +1127,7 @@ app.post('/api/war/peace', ah(auth), ah(async (req, res) => {
     await emitEvent('war_ended', w.attacker_code, w.defender_code,
       `انتهت الحرب بين ${cname(w.attacker_code)} و${cname(w.defender_code)}${reparations ? ` — تعويضات ${reparations} مليون دولار` : ''}`,
       { war_id: w.id, reparations: reparations || 0 });
-    await audit('war_peace', req.user.username, `سلام في حرب #${w.id} (تعويضات: ${reparations || 0})`, req);
+    await audit('war_peace', actorUsername, `سلام في حرب #${w.id} (تعويضات: ${reparations || 0})`);
     await notifyCountry(w.attacker_code, 'peace', 'انتهت الحرب!',
       `انتهت الحرب ضد ${cname(w.defender_code)}.${reparations && winnerCC === w.attacker_code ? ` حصلت على تعويضات ${reparations} مليون دولار.` : ''}`, '#/news');
     await notifyCountry(w.defender_code, 'peace', 'انتهت الحرب!',
@@ -1150,7 +1135,7 @@ app.post('/api/war/peace', ah(auth), ah(async (req, res) => {
     await hqArticle(`سلام: انتهاء الحرب بين ${cname(w.attacker_code)} و${cname(w.defender_code)}`,
       `وُقّع السلام رسميًا بين ${cname(w.attacker_code)} و${cname(w.defender_code)}${reparations ? ` مع تعويضات حرب قدرها ${reparations} مليون دولار` : ''}.`, 'wars');
   };
-  if (Math.abs(diff) >= 50 || (dev && b.force)) {
+  if (Math.abs(diff) >= 50 || force) {
     const winnerCC = diff >= 0 ? w.attacker_code : w.defender_code;
     const loserCC = diff >= 0 ? w.defender_code : w.attacker_code;
     const want = Math.round(Math.abs(diff) * 5);
@@ -1159,22 +1144,54 @@ app.post('/api/war/peace', ah(auth), ah(async (req, res) => {
     if (paid > 0) {
       await deductLiquidity(loserCC, paid);
       await addLiquidity(winnerCC, paid);
-      await logLiq(loserCC, -paid, `تعويضات حرب لصالح ${cname(winnerCC)}`, req.user.username);
-      await logLiq(winnerCC, paid, `تعويضات حرب من ${cname(loserCC)}`, req.user.username);
+      await logLiq(loserCC, -paid, `تعويضات حرب لصالح ${cname(winnerCC)}`, actorUsername);
+      await logLiq(winnerCC, paid, `تعويضات حرب من ${cname(loserCC)}`, actorUsername);
     }
     await finishWar(paid, winnerCC);
-    return res.json({ ok: true, enforced: true, winner: winnerCC, winner_name: cname(winnerCC), reparations: paid });
+    return { enforced: true, winner: winnerCC, winner_name: cname(winnerCC), reparations: paid };
   }
   if (w.proposed_by && w.proposed_by !== meSide) {
     await finishWar(0, null);
-    return res.json({ ok: true, negotiated: true });
+    return { negotiated: true };
   }
-  if (w.proposed_by === meSide) return res.status(400).json({ error: 'عرضك للسلام قائم بانتظار الطرف الآخر' });
+  if (w.proposed_by === meSide) throw { status: 400, message: 'عرضك للسلام قائم بانتظار الطرف الآخر' };
   await q('UPDATE wars SET proposed_by=$1 WHERE id=$2', [meSide, w.id]);
   await emitEvent('peace_proposed', meSide, otherSide, `${cname(meSide)} تعرض السلام على ${cname(otherSide)}`, { war_id: w.id });
   await notifyCountry(otherSide, 'peace_offer', `${cname(meSide)} تعرض السلام`,
     `${cname(meSide)} عرضت إنهاء الحرب سلميًا. اقبل من صفحة الحرب.`, '#/news');
-  res.json({ ok: true, proposed: true });
+  return { proposed: true };
+}
+
+// إعلان حرب — صاحب الدولة المهاجمة أو المطورون
+// إعلان حرب — صاحب الدولة المهاجمة أو المطورون
+app.post('/api/war/declare', ah(auth), ah(async (req, res) => {
+  const dev = isDeveloper(req.user);
+  const b = req.body || {};
+  const target = String(b.target_code || '').toUpperCase();
+  const attacker = dev && b.attacker_code ? String(b.attacker_code).toUpperCase() : req.user.country_code;
+  if (!dev && req.user.country_code !== attacker) return res.status(403).json({ error: 'غير مصرح' });
+  const warId = await declareWarInternal(attacker, target, req.user.username);
+  res.json({ ok: true, war_id: warId });
+}));
+// معركة — المبادرة للمهاجم (أو المطورون)، والمدافع يدافع تلقائيًا بأفضلية التضاريس
+// معركة — المبادرة للمهاجم (أو المطورون)، والمدافع يدافع تلقائيًا بأفضلية التضاريس
+app.post('/api/war/battle', ah(auth), ah(async (req, res) => {
+  const dev = isDeveloper(req.user);
+  const b = req.body || {};
+  const w = await one('SELECT * FROM wars WHERE id=$1', [parseInt(b.war_id, 10) || 0]);
+  if (!w || w.status !== 'active') return res.status(404).json({ error: 'لا توجد حرب نشطة بهذا الرقم' });
+  if (!dev && req.user.country_code !== w.attacker_code)
+    return res.status(403).json({ error: 'غير مصرح — المبادرة بالمعارك للطرف المهاجم' });
+  const out = await battleInternal(w.id, w.attacker_code, b.units, b.region, req.user.username);
+  res.json(Object.assign({ ok: true }, out));
+}));
+// السلام — تفاوضي بموافقة الطرفين، أو مفروض عند تفوق ساحق (فرق 50+ نقطة) مع تعويضات
+// السلام — تفاوضي بموافقة الطرفين، أو مفروض عند تفوق ساحق (فرق 50+ نقطة) مع تعويضات
+app.post('/api/war/peace', ah(auth), ah(async (req, res) => {
+  const dev = isDeveloper(req.user);
+  const b = req.body || {};
+  const out = await peaceInternal(b.war_id, req.user.country_code, req.user.username, dev && b.force);
+  res.json(Object.assign({ ok: true }, out));
 }));
 // ---------- المعاهدات ----------
 // قائمة المعاهدات — العامة فقط (السرية لا تظهر إلا لأطرافها والمطورين)
@@ -1636,7 +1653,10 @@ async function runMonthlyTick() {
     const months = Math.floor(g / GAME_MONTH_MS) - Math.floor(last / GAME_MONTH_MS);
     if (months <= 0) return;
     const n = Math.min(months, 24); // سقف أمان ضد الانفجار
+    const startMonth = Math.floor(last / GAME_MONTH_MS);
     for (let i = 0; i < n; i++) await monthlyTickOnce();
+    for (let i = 1; i <= n; i++) { try { await aiNationsTick(startMonth + i); } catch (e) { /* غير حرج */ } }
+    for (let i = 1; i <= n; i++) { try { await advisorAutoTick(startMonth + i); } catch (e) { /* غير حرج */ } }
     await q('UPDATE game_clock SET last_tick_game_ms=$1 WHERE id=1', [Math.floor(g / GAME_MONTH_MS) * GAME_MONTH_MS]);
   } catch (e) { /* غير حرج */ }
 }
@@ -1786,6 +1806,8 @@ async function seedEconomy() {
     "ctype TEXT DEFAULT 'national'", "status TEXT DEFAULT 'approved'",
     'host_country TEXT', 'capital_usd DOUBLE PRECISION',
   ]) { try { await q(`ALTER TABLE companies ADD COLUMN ${colDef}`); } catch (e) { /* موجود */ } }
+  // شركات الحاكم الذكي بلا مالك مستخدم
+  try { await q('ALTER TABLE companies ALTER COLUMN owner_id DROP NOT NULL'); } catch (e) { /* مدعوم */ }
   // المرحلة 4: منتج الشركة + الاستقرار/الدعم الشعبي/التضخم لكل دولة
   try { await q(`ALTER TABLE companies ADD COLUMN product TEXT DEFAULT ''`); } catch (e) { /* موجود */ }
   for (const colDef of [
@@ -1814,6 +1836,10 @@ async function seedEconomy() {
   // عروض الموارد لا تحمل weapon_id
   for (const t of ['market_listings', 'market_orders']) {
     try { await q(`ALTER TABLE ${t} ALTER COLUMN weapon_id DROP NOT NULL`); } catch (e) { /* مدعوم */ }
+  }
+  // عروض الدول الذكية بلا مستخدم بائع
+  for (const t of ['market_listings', 'market_orders']) {
+    try { await q(`ALTER TABLE ${t} ALTER COLUMN seller_id DROP NOT NULL`); } catch (e) { /* مدعوم */ }
   }
   await q("UPDATE market_listings SET kind='weapon' WHERE kind IS NULL");
   await q("UPDATE market_orders SET kind='weapon' WHERE kind IS NULL");
@@ -1913,8 +1939,13 @@ app.get('/api/economy', ah(auth), ah(async (req, res) => {
                             WHERE status='approved' GROUP BY host_country`);
   const cmap = {};
   for (const c of counts) cmap[c.country_code] = Number(c.n) || 0;
+  const aiRows = await all(`SELECT country_code FROM ai_nations WHERE enabled=1`);
+  const aiSet = new Set(aiRows.map((r) => r.country_code));
+  const claimedRows = await all(`SELECT DISTINCT country_code FROM users WHERE country_code IS NOT NULL`);
+  const claimedSet = new Set(claimedRows.map((r) => r.country_code));
   res.json({
-    economies: rows.map((r) => ({ ...econRow(r), companies_count: cmap[r.country_code] || 0 })),
+    economies: rows.map((r) => ({ ...econRow(r), companies_count: cmap[r.country_code] || 0,
+      ai_governed: aiSet.has(r.country_code) && !claimedSet.has(r.country_code) })),
     sectors: SECTORS, full,
   });
 }));
@@ -2123,39 +2154,48 @@ app.put('/api/companies/:id', ah(auth), ah(async (req, res) => {
   res.json({ ok: true });
 }));
 // جمع إنتاج الشركة — شهريًا بزمن اللعبة: كل عامل ينتج كمية ثابتة حسب المورد
-app.post('/api/companies/:id/collect', ah(auth), ah(async (req, res) => {
-  const row = await one('SELECT * FROM companies WHERE id=$1', [req.params.id]);
-  if (!row) return res.status(404).json({ error: 'الشركة غير موجودة' });
-  if (row.status !== 'approved') return res.status(400).json({ error: 'الشركة لم تُعتمد بعد' });
-  const dev = isDeveloper(req.user);
-  if (!dev && row.owner_id !== req.user.id) return res.status(403).json({ error: 'غير مصرح' });
+// جمع إنتاج الشركة — منطق داخلي مشترك (اللاعبون + الحكام الأذكياء)
+async function collectCompanyInternal(id, actor) {
+  const row = await one('SELECT * FROM companies WHERE id=$1', [id]);
+  if (!row) throw Object.assign(new Error('الشركة غير موجودة'), { status: 404 });
+  if (row.status !== 'approved') throw Object.assign(new Error('الشركة لم تُعتمد بعد'), { status: 400 });
   if (!row.resource_kind || !RES_AR[row.resource_kind])
-    return res.status(400).json({ error: 'هذه الشركة غير متخصصة في استخراج مورد — حدد تخصصها أولًا' });
+    throw Object.assign(new Error('هذه الشركة غير متخصصة في استخراج مورد — حدد تخصصها أولًا'), { status: 400 });
   const workers = Number(row.workers) || 0;
-  if (workers <= 0) return res.status(400).json({ error: 'حدد عدد العمال أولًا' });
+  if (workers <= 0) throw Object.assign(new Error('حدد عدد العمال أولًا'), { status: 400 });
   const nowG = await gameNow();
   const monthStart = gameMonthIdx(nowG) * GAME_MONTH_MS; // بداية شهر اللعبة الحالي بالمللي
   // حجز ذري لشهر اللعبة: أول طلب فقط ينجح — يمنع غليتش الأموال عند الضغط المزدوج
   const claim = await q('UPDATE companies SET last_collect=$1 WHERE id=$2 AND (last_collect IS NULL OR last_collect < $3)',
     [nowG, row.id, monthStart]);
   if (!claim.rowCount)
-    return res.status(400).json({ error: 'تم جمع إنتاج هذا الشهر — عُد الشهر القادم (شهر لعبة)' });
+    throw Object.assign(new Error('تم جمع إنتاج هذا الشهر — عُد الشهر القادم (شهر لعبة)'), { status: 400 });
   const reserveTotal = Number((RESERVES[row.host_country] || {})[row.resource_kind]) || 0;
   const exRow = await one('SELECT extracted FROM resource_extracted WHERE country_code=$1 AND resource=$2', [row.host_country, row.resource_kind]);
   const extractedSoFar = exRow ? Number(exRow.extracted) || 0 : 0;
   const remaining = reserveTotal - extractedSoFar;
   if (remaining <= 0)
-    return res.status(400).json({ error: 'نفد احتياطي ' + RES_AR[row.resource_kind] + ' في ' + cname(row.host_country) });
+    throw Object.assign(new Error('نفد احتياطي ' + RES_AR[row.resource_kind] + ' في ' + cname(row.host_country)), { status: 400 });
   let amount = Math.floor(Math.min(workers * RES_RATE[row.resource_kind], remaining));
-  if (amount <= 0) return res.status(400).json({ error: 'لا يوجد إنتاج متاح هذا الشهر' });
+  if (amount <= 0) throw Object.assign(new Error('لا يوجد إنتاج متاح هذا الشهر'), { status: 400 });
   await addStock(row.host_country, row.resource_kind, amount);
   if (exRow) await q('UPDATE resource_extracted SET extracted = extracted + $3 WHERE country_code=$1 AND resource=$2',
     [row.host_country, row.resource_kind, amount]);
   else await q('INSERT INTO resource_extracted (country_code,resource,extracted) VALUES ($1,$2,$3)',
     [row.host_country, row.resource_kind, amount]);
-  await logLiq(row.host_country, 0, `إنتاج ${RES_AR[row.resource_kind]}: ${amount.toLocaleString('en-US')} ${RES_UNIT[row.resource_kind]} من «${row.name}» (${workers.toLocaleString('en-US')} عامل)`, req.user.username);
-  res.json({ ok: true, amount, unit: RES_UNIT[row.resource_kind], resource: RES_AR[row.resource_kind],
-             stock: await getStock(row.host_country, row.resource_kind), reserve_remaining: remaining - amount });
+  await logLiq(row.host_country, 0, `إنتاج ${RES_AR[row.resource_kind]}: ${amount.toLocaleString('en-US')} ${RES_UNIT[row.resource_kind]} من «${row.name}» (${workers.toLocaleString('en-US')} عامل)`, actor);
+  return { amount, unit: RES_UNIT[row.resource_kind], resource: RES_AR[row.resource_kind],
+           stock: await getStock(row.host_country, row.resource_kind), reserve_remaining: remaining - amount };
+}
+// جمع إنتاج الشركة — شهريًا بزمن اللعبة: كل عامل ينتج كمية ثابتة حسب المورد
+app.post('/api/companies/:id/collect', ah(auth), ah(async (req, res) => {
+  const prow = await one('SELECT id, owner_id, status FROM companies WHERE id=$1', [req.params.id]);
+  if (!prow) return res.status(404).json({ error: 'الشركة غير موجودة' });
+  const dev = isDeveloper(req.user);
+  if (!dev && prow.owner_id !== req.user.id) return res.status(403).json({ error: 'غير مصرح' });
+  if (prow.status !== 'approved') return res.status(400).json({ error: 'الشركة لم تُعتمد بعد' });
+  const r = await collectCompanyInternal(req.params.id, req.user.username);
+  res.json({ ok: true, ...r });
 }));
 // حذف شركة — مالكها أو المطورون
 app.delete('/api/companies/:id', ah(auth), ah(async (req, res) => {
@@ -2233,21 +2273,18 @@ app.put('/api/economy/:code', ah(auth), ah(async (req, res) => {
 }));
 
 // جباية الضرائب — مرة كل شهر لعبة: الناتج السنوي × النسبة ÷ 12 (ممنوعة أثناء الثورة)
-app.post('/api/economy/:code/collect-taxes', ah(auth), ah(async (req, res) => {
-  const cc = String(req.params.code || '').toUpperCase();
-  if (!validCountry(cc)) return res.status(400).json({ error: 'كود دولة غير صالح' });
-  const dev = isDeveloper(req.user);
-  if (!dev && req.user.country_code !== cc) return res.status(403).json({ error: 'غير مصرح' });
+// جباية الضرائب الشهرية — منطق داخلي مشترك (اللاعبون + الحكام الأذكياء)
+async function collectTaxesInternal(cc, actor) {
   const e = await one('SELECT * FROM country_economy WHERE country_code=$1', [cc]);
-  if (!e) return res.status(400).json({ error: 'لا توجد بيانات اقتصادية' });
-  if (e.revolt_active) return res.status(403).json({ error: 'لا يمكن جباية الضرائب أثناء الثورة الشعبية' });
+  if (!e) throw Object.assign(new Error('لا توجد بيانات اقتصادية'), { status: 400 });
+  if (e.revolt_active) throw Object.assign(new Error('لا يمكن جباية الضرائب أثناء الثورة الشعبية'), { status: 403 });
   const nowG = await gameNow();
   const monthStart = gameMonthIdx(nowG) * GAME_MONTH_MS; // بداية شهر اللعبة الحالي بالمللي
   // حجز ذري لشهر اللعبة: أول طلب فقط ينجح — يمنع غليتش الأموال عند الضغط المزدوج
   const claim = await q('UPDATE country_economy SET last_tax_collect=$1 WHERE country_code=$2 AND (last_tax_collect IS NULL OR last_tax_collect < $3)',
     [nowG, cc, monthStart]);
   if (!claim.rowCount)
-    return res.status(400).json({ error: 'تمت الجباية هذا الشهر — عُد الشهر القادم (شهر لعبة = ساعتان)' });
+    throw Object.assign(new Error('تمت الجباية هذا الشهر — عُد الشهر القادم (شهر لعبة = ساعتان)'), { status: 400 });
   const rate = e.tax_rate != null ? Number(e.tax_rate) : 10;
   const gdp = e.gdp_m_intl != null ? Number(e.gdp_m_intl) : null;
   const liq = e.liquidity_m_usd != null ? Number(e.liquidity_m_usd) : null;
@@ -2255,9 +2292,17 @@ app.post('/api/economy/:code/collect-taxes', ah(auth), ah(async (req, res) => {
   const amount = Math.round(base * (rate / 100) / 12);
   await q('UPDATE country_economy SET liquidity_m_usd = COALESCE(liquidity_m_usd,0) + $2 WHERE country_code=$1',
     [cc, amount]);
-  await logLiq(cc, amount, `جباية الضرائب الشهرية بنسبة ${rate}%`, req.user.username);
+  await logLiq(cc, amount, `جباية الضرائب الشهرية بنسبة ${rate}%`, actor);
   const ne = await one('SELECT liquidity_m_usd FROM country_economy WHERE country_code=$1', [cc]);
-  res.json({ ok: true, amount, liquidity: Number(ne.liquidity_m_usd) || 0 });
+  return { amount, liquidity: Number(ne.liquidity_m_usd) || 0 };
+}
+app.post('/api/economy/:code/collect-taxes', ah(auth), ah(async (req, res) => {
+  const cc = String(req.params.code || '').toUpperCase();
+  if (!validCountry(cc)) return res.status(400).json({ error: 'كود دولة غير صالح' });
+  const dev = isDeveloper(req.user);
+  if (!dev && req.user.country_code !== cc) return res.status(403).json({ error: 'غير مصرح' });
+  const r = await collectTaxesInternal(cc, req.user.username);
+  res.json({ ok: true, ...r });
 }));
 
 // ---------- الإشعارات ----------
@@ -3536,8 +3581,284 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'خطأ داخلي في الخادم' });
 });
 
+// ============================================================================
+// الدول الذكية AI Nations — حكام مستقلون للدول غير المحجوزة
+// ----------------------------------------------------------------------------
+// كل شهر لعبة، كل دولة بلا لاعب تحصل على «دور» مستقل بنفس قواعد اللعبة تمامًا:
+// جباية الضرائب، ضبط الضريبة حسب الاستقرار، جمع إنتاج شركات الاستخراج،
+// وتأسيس شركات وطنية جديدة عند توفر السيولة. كل إجراء مسجل في audit_log.
+// عندما يحجز لاعب دولة كانت ذكية، يتوقف حاكمها تلقائيًا ويرث اللاعب ما بناه.
+// ============================================================================
+const AI_ACTOR = '🤖 الحاكم الذكي';
+async function initAiNations() {
+  await q(`CREATE TABLE IF NOT EXISTS ai_nations (
+    country_code TEXT PRIMARY KEY, enabled INT DEFAULT 1,
+    strategy TEXT DEFAULT 'balanced', last_tick_month BIGINT, updated_at BIGINT)`);
+  const claimed = await aiClaimedSet();
+  for (const c of COUNTRIES) {
+    if (claimed.has(c.code)) continue;
+    await q(`INSERT INTO ai_nations (country_code, enabled, strategy, updated_at)
+             VALUES ($1, 1, $2, $3) ON CONFLICT (country_code) DO NOTHING`,
+      [c.code, aiStrategyFor(c.code), Date.now()]);
+  }
+}
+// استراتيجية حتمية حسب كود الدولة — نفس الدولة دائمًا نفس الشخصية
+function aiStrategyFor(cc) {
+  let h = 0; for (const ch of cc) h = (h * 31 + ch.charCodeAt(0)) % 997;
+  return h % 3 === 0 ? 'conservative' : h % 3 === 1 ? 'balanced' : 'expansionist';
+}
+async function aiClaimedSet() {
+  const rows = await all(`SELECT DISTINCT country_code FROM users WHERE country_code IS NOT NULL`);
+  return new Set(rows.map((r) => r.country_code));
+}
+// الدور الشهري للدول الذكية — يُستدعى من المحرك الشهري لكل شهر لعبة منقضٍ
+async function aiNationsTick(monthIdx) {
+  let rows;
+  try {
+    rows = await all(`SELECT country_code, strategy FROM ai_nations
+                      WHERE enabled=1 AND (last_tick_month IS NULL OR last_tick_month < $1)`, [monthIdx]);
+  } catch (e) { return; } // الجدول غير جاهز بعد
+  if (!rows.length) return;
+  const claimed = await aiClaimedSet();
+  for (const r of rows) {
+    const cc = r.country_code;
+    try {
+      if (claimed.has(cc)) {
+        // حُجزت الدولة بلاعب — إيقاف حاكمها الذكي نهائيًا
+        await q('UPDATE ai_nations SET enabled=0, updated_at=$2 WHERE country_code=$1', [cc, Date.now()]);
+        await audit('ai_nation', AI_ACTOR, `${cname(cc)}: توقف الحاكم الذكي — الدولة أصبحت بيد لاعب`);
+        continue;
+      }
+      await aiGovern(cc, r.strategy || 'balanced');
+    } catch (e) { console.error('AI govern:', cc, e.message); }
+    await q('UPDATE ai_nations SET last_tick_month=$2, updated_at=$3 WHERE country_code=$1', [cc, monthIdx, Date.now()]);
+  }
+}
+// دور واحد لدولة ذكية — كأن لاعبًا حقيقيًا يديرها: اقتصاد + جيش + دبلوماسية + استخبارات
+// الحاكم الذكي لاعب كامل: حروب محسوبة ومعاهدات وتجسس تشمل البشر — باحتمالات شهرية منخفضة وشروط صارمة
+async function aiGovern(cc, strategy, actor = AI_ACTOR, domains = null) {
+  const e = await one('SELECT * FROM country_economy WHERE country_code=$1', [cc]);
+  if (!e || e.revolt_active) return; // ثورة شعبية = شلل — لا جباية ولا استثمار
+  const liqOf = async () => Number((await one('SELECT liquidity_m_usd FROM country_economy WHERE country_code=$1', [cc])).liquidity_m_usd) || 0;
+
+  const D = domains || { economy: 1, companies: 1, military: 1, diplomacy: 1, intel: 1 };
+  // ---------- 1) الاقتصاد ----------
+  if (D.economy) {
+    try { await collectTaxesInternal(cc, actor); } catch (err) { /* جُبيت مسبقًا هذا الشهر */ }
+  const stab = await getEconStat(cc, 'stability', 70);
+  const cur = e.tax_rate != null ? Number(e.tax_rate) : 10;
+  const band = { conservative: [8, 13], balanced: [12, 18], expansionist: [17, 24] }[strategy] || [12, 18];
+  let target = Math.round((band[0] + band[1]) / 2);
+  if (stab < 25) target = 8;
+  else if (stab < 45) target = Math.min(target, 12);
+  else if (stab > 85) target = Math.min(band[1], target + 2);
+  if (target !== cur) await setCountryTax(cc, target, actor, null);
+  }
+  const comps = D.companies ? await all(`SELECT id FROM companies WHERE host_country=$1 AND status='approved' AND resource_kind IS NOT NULL`, [cc]) : [];
+  for (const c of comps) {
+    try { await collectCompanyInternal(c.id, actor); } catch (err) { /* نفد الاحتياطي أو جُمع مسبقًا */ }
+  }
+  let liq = await liqOf();
+  if (D.companies && liq > 400 && comps.length < 6) {
+    try { await aiFoundCompany(cc, liq); liq = await liqOf(); } catch (err) { /* بلا احتياطي أو سيولة غير كافية */ }
+  }
+  // بيع فائض الموارد في السوق — عرض واحد شهريًا كحد أقصى (تجارة طبيعية مع البشر)
+  if (D.companies) {
+    const AI_RES_PRICE = { oil: 0.02, gas: 0.015, iron: 0.01, coal: 0.008, grain: 0.005, cotton: 0.008 };
+    const bigStocks = await all(`SELECT resource, stock FROM country_stocks WHERE country_code=$1 AND stock > 20000`, [cc]);
+    for (const s of bigStocks) {
+      if (!RES_AR[s.resource]) continue;
+      const listed = await one(`SELECT id FROM market_listings WHERE seller_country=$1 AND resource=$2 AND status='active' AND kind='resource'`, [cc, s.resource]);
+      if (listed) continue;
+      const avail = Number(s.stock) - Number(await reservedStock(cc, s.resource) || 0);
+      const qty = Math.floor(avail * 0.25);
+      if (qty < 1000) continue;
+      await q(`INSERT INTO market_listings (seller_id,seller_country,weapon_id,qty,price_unit_m_usd,kind,title,unit,resource,created_at)
+               VALUES (NULL,$1,NULL,$2,$3,'resource',$4,$5,$6,$7)`,
+        [cc, qty, AI_RES_PRICE[s.resource] || 0.01, RES_AR[s.resource], RES_UNIT[s.resource], s.resource, Date.now()]);
+      await logLiq(cc, 0, `عرض ${qty.toLocaleString('en-US')} ${RES_UNIT[s.resource]} ${RES_AR[s.resource]} للبيع في السوق`, actor);
+      break;
+    }
+  }
+
+  // ---------- 2) الجيش: تجنيد نحو هدف سكاني + تدريب ----------
+  if (D.military) {
+  const pop = Number(e.population) || 0;
+  const pct = { conservative: 0.004, balanced: 0.007, expansionist: 0.012 }[strategy] || 0.007;
+  const mil = await getArmy(cc);
+  const targetSoldiers = Math.round(pop * pct);
+  if (mil.soldiers < targetSoldiers && liq > 300) {
+    const need = Math.min(targetSoldiers - mil.soldiers, 20000); // سقف تجنيد شهري
+    const cost = Math.round(need * 0.004 * 100) / 100; // 4 آلاف دولار للجندي
+    if (await deductLiquidity(cc, cost)) {
+      await setArmyStat(cc, { soldiers: mil.soldiers + need });
+      await logLiq(cc, -cost, `تجنيد ${need.toLocaleString('en-US')} جندي`, actor);
+      await audit('army_recruit', actor, `${cname(cc)}: تجنيد ${need.toLocaleString('en-US')} جندي بتكلفة ~${cost} مليون دولار`);
+      liq = await liqOf();
+    }
+  }
+  if (mil.training < 80 && liq > 500) {
+    const tCost = 30;
+    if (await deductLiquidity(cc, tCost)) {
+      await setArmyStat(cc, { training: Math.min(100, mil.training + 3) });
+      await logLiq(cc, -tCost, 'برنامج تدريب عسكري', actor);
+      liq = await liqOf();
+    }
+  }
+
+  }
+  // ---------- 3) الدبلوماسية ----------
+  if (D.diplomacy) {
+  // الرد على العروض المعلقة: قبول عدم الاعتداء دائمًا، والتجاري غالبًا، ورفض الباقي
+  const pending = await all(`SELECT * FROM treaties WHERE to_code=$1 AND status='proposed'`, [cc]);
+  for (const t of pending) {
+    const g = await gameNow();
+    if (t.type === 'non_aggression' || (t.type === 'trade' && Math.random() < 0.6)) {
+      await q(`UPDATE treaties SET status='active', decided_game_time=$1 WHERE id=$2`, [g, t.id]);
+      await emitEvent('treaty_signed', t.from_code, t.to_code,
+        `توقيع ${TREATY_TYPES[t.type]} بين ${cname(t.from_code)} و${cname(t.to_code)}`, { treaty_id: t.id });
+      await audit('treaty_accept', actor, `${cname(cc)} قبلت ${TREATY_TYPES[t.type]} من ${cname(t.from_code)}`);
+      await notifyCountry(t.from_code, 'treaty', `قُبِلت معاهدتك!`,
+        `${cname(t.to_code)} قبلت: ${TREATY_TYPES[t.type]}.`, '#/news');
+    } else if (['alliance', 'defensive', 'military_access', 'embargo'].includes(t.type)) {
+      await q(`UPDATE treaties SET status='rejected', decided_game_time=$1 WHERE id=$2`, [g, t.id]);
+      await audit('treaty_reject', actor, `${cname(cc)} رفضت ${TREATY_TYPES[t.type] || t.type} من ${cname(t.from_code)}`);
+      await notifyCountry(t.from_code, 'treaty', `رُفِضت معاهدتك`,
+        `${cname(t.to_code)} رفضت: ${TREATY_TYPES[t.type]}.`, '#/news');
+    }
+  }
+  // مبادرة محسوبة: معاهدة مع دولة ذكية أخرى فقط (10% شهريًا — بلا إزعاج للبشر)
+  if (Math.random() < 0.10 && liq > 200) {
+    const pool = COUNTRIES.map(c => c.code).filter(c => c !== cc); // ذكية وبشرية — لعب طبيعي
+    const o = pool[Math.floor(Math.random() * pool.length)];
+    const type = Math.random() < 0.5 ? 'non_aggression' : 'trade';
+    try { await proposeTreaty(cc, o, type, 0, actor); } catch (err) { /* معاهدة قائمة أصلًا */ }
+  }
+
+  }
+  // ---------- 4) الاستخبارات: تجسس محسوب + أمن مضاد ----------
+  if (D.intel) {
+  if (Math.random() < 0.12 && liq > 200) {
+    const pool = COUNTRIES.map(c => c.code).filter(c => c !== cc); // ذكية وبشرية — لعب طبيعي
+    const o = pool[Math.floor(Math.random() * pool.length)];
+    const kind = Math.random() < 0.5 ? 'economy' : 'stability';
+    try { await runSpyOp(cc, o, kind, actor); } catch (err) { /* سيولة أو حد شهري */ }
+  }
+  try {
+    const sec = await getSecurity(cc);
+    if (sec < 40 && liq > 600) {
+      const want = 50, cost = (want - sec) * 1;
+      if (await deductLiquidity(cc, cost)) {
+        await q(`UPDATE intel_security SET level=$2, updated_at=$3 WHERE country_code=$1`, [cc, want, Date.now()]);
+        await logLiq(cc, -cost, `تشديد الأمن المضاد إلى ${want}`, actor);
+        await audit('intel_security', actor, `${cname(cc)} رفع الأمن إلى ${want}`);
+      }
+    }
+  } catch (err) { /* غير حرج */ }
+  }
+  // ---------- 5) الحرب والسلام: إعلان محسوب + معارك + سلام عند الاستنزاف ----------
+  if (D.military) {
+    const wmil = await getArmy(cc);
+    const stabNow = await getEconStat(cc, 'stability', 70);
+    const gNow = await gameNow();
+    let myWars = await all(`SELECT * FROM wars WHERE status='active' AND (attacker_code=$1 OR defender_code=$1)`, [cc]);
+    // السلام: تفوق ساحق (فرض بتعويضات)، خسارة فادحة، أو حرب مستنزفة تجاوزت سنة لعبة
+    for (const w of myWars) {
+      const myDiff = w.attacker_code === cc ? Number(w.score_a) - Number(w.score_b) : Number(w.score_b) - Number(w.score_a);
+      const monthsAtWar = (gNow - Number(w.started_game_time || gNow)) / GAME_MONTH_MS;
+      if (myDiff >= 50 || myDiff <= -30 || monthsAtWar > 12) {
+        try { await peaceInternal(w.id, cc, actor); } catch (e) { /* عرض قائم أو حرب انتهت */ }
+      }
+    }
+    myWars = await all(`SELECT * FROM wars WHERE status='active' AND (attacker_code=$1 OR defender_code=$1)`, [cc]);
+    // المعارك: دور المهاجم فقط — هجوم شهري محسوب عند الجاهزية الكافية
+    for (const w of myWars) {
+      if (w.attacker_code !== cc) continue;
+      const a2 = await getArmy(cc);
+      if (a2.readiness > 45 && a2.soldiers > 8000 && Math.random() < 0.6) {
+        const units = Math.min(Math.floor(a2.soldiers * 0.25), 40000);
+        if (units >= 1000) { try { await battleInternal(w.id, cc, units, '', actor); } catch (e) { /* */ } }
+      }
+    }
+    // إعلان الحرب: التوسعيون (ونادرًا المتوازنون) — بتفوق عددي واضح فقط واحتمال شهري منخفض
+    const busy = myWars.length > 0;
+    if (!busy) {
+      const warP = strategy === 'expansionist' ? 0.03 : strategy === 'balanced' ? 0.008 : 0;
+      if (Math.random() < warP && stabNow > 55 && wmil.soldiers > 30000 && wmil.readiness > 60) {
+        const pool = COUNTRIES.map(c => c.code).filter(c => c !== cc);
+        for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = pool[i]; pool[i] = pool[j]; pool[j] = t; }
+        for (const t of pool.slice(0, 8)) {
+          if (await activeWarBetween(cc, t)) continue;
+          let blocked = false;
+          for (const tt of ['non_aggression', 'alliance', 'defensive']) {
+            if (await activeTreaty(cc, t, tt)) { blocked = true; break; }
+          }
+          if (blocked) continue;
+          const tm = await getArmy(t);
+          if (tm.soldiers > wmil.soldiers * 0.6) continue; // تفوق واضح فقط — لا حروب انتحارية
+          try { await declareWarInternal(cc, t, actor); break; } catch (e) { /* جرّب التالي */ }
+        }
+      }
+    }
+  }
+}
+// تأسيس شركة استخراج وطنية — تختار المورد الأكبر احتياطيًا المتبقي
+async function aiFoundCompany(cc, liq) {
+  const res = RESERVES[cc] || {};
+  let best = null, bestRem = 0;
+  for (const rk of Object.keys(RES_AR)) {
+    const total = Number(res[rk]) || 0;
+    if (!total) continue;
+    const exRow = await one('SELECT extracted FROM resource_extracted WHERE country_code=$1 AND resource=$2', [cc, rk]);
+    const rem = total - (exRow ? Number(exRow.extracted) || 0 : 0);
+    if (rem > bestRem) { bestRem = rem; best = rk; }
+  }
+  if (!best || bestRem <= 0) return;
+  const cities = citiesOf(cc);
+  if (!cities.length) return;
+  const erow = await one('SELECT units_per_usd FROM country_economy WHERE country_code=$1', [cc]);
+  const rate = erow && erow.units_per_usd ? Number(erow.units_per_usd) : 1;
+  const capUsd = Math.max(60, Math.min(1500, Math.round(liq * 0.08))); // 8% من السيولة بحدود آمنة
+  const ok = await deductLiquidity(cc, capUsd); // خصم ذري — يفشل بأمان لو نقص الرصيد
+  if (!ok) return;
+  const name = `الشركة الوطنية لل${RES_AR[best]} — ${cname(cc)}`;
+  const city = cities[Math.floor(Math.random() * cities.length)];
+  await logLiq(cc, -capUsd, `تأسيس شركة «${name}» (${city})`, AI_ACTOR);
+  await q(`INSERT INTO companies (country_code,host_country,owner_id,ctype,status,name,sector,city,
+           capital,capital_usd,description,resource_kind,workers,product,created_at,updated_at)
+           VALUES ($1,$1,NULL,'national','approved',$2,'تعدين',$3,$4,$5,$6,$7,800,'',$8,$8)`,
+    [cc, name, city, Math.round(capUsd * rate), capUsd, 'شركة وطنية أسسها الحاكم الذكي', best, Date.now()]);
+  await audit('company_found', AI_ACTOR, `${cname(cc)}: تأسيس «${name}» لاستخراج ${RES_AR[best]} برأس مال ~${capUsd} مليون دولار`);
+}
+
+
+// التفويض الكامل للدول المحجوزة: مستشار بالوضع 3 (مدير مفوض) يدير مجالاته تلقائيًا كل شهر لعبة
+async function advisorAutoTick(monthIdx) {
+  try { await q(`ALTER TABLE advisor_settings ADD COLUMN IF NOT EXISTS last_auto_month BIGINT`); } catch (e) { /* موجود */ }
+  let rows;
+  try {
+    rows = await all(`SELECT country_code, advisor_name, domains FROM advisor_settings
+                      WHERE mode=3 AND (last_auto_month IS NULL OR last_auto_month < $1)`, [monthIdx]);
+  } catch (e) { return; }
+  if (!rows.length) return;
+  const claimed = await aiClaimedSet();
+  for (const r of rows) {
+    const cc = r.country_code;
+    try {
+      if (!claimed.has(cc)) continue; // لم تعد محجوزة — يتولاها الحاكم الذكي العام
+      let domains = null;
+      try { domains = JSON.parse(r.domains || '{}'); } catch (e) { domains = {}; }
+      if (!Object.values(domains).some(Boolean)) continue; // لا مجالات مفوضة
+      const actor = `🤖 ${(r.advisor_name || 'المستشار').slice(0, 40)}`;
+      await aiGovern(cc, aiStrategyFor(cc), actor, domains);
+      await audit('advisor_auto', actor, `${cname(cc)}: دور شهري تلقائي للمجالات المفوضة`);
+    } catch (e) { console.error('advisor auto:', cc, e.message); }
+    await q('UPDATE advisor_settings SET last_auto_month=$2 WHERE country_code=$1', [cc, monthIdx]);
+  }
+}
 // ---------------- بدء التشغيل ----------------
 (async () => {
   await initDb();
+  try { await initAiNations(); } catch (e) { console.error('ai_nations:', e.message); }
   app.listen(PORT, () => console.log(`📰 جريدة أرجوس تعمل على http://localhost:${PORT}`));
 })();

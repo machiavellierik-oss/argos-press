@@ -1036,7 +1036,8 @@ async function vEconomy() {
         <i>${fmtPop(e.population)} نسمة · ناتج ${fmtGdp(e.gdp_m_intl)}</i>
         <i>${esc(e.currency_name || '—')} · ${rate}</i>
         <i>السيولة: ${e.liquidity_m_usd == null ? '—' : fmtRate(e.liquidity_m_usd) + ' مليون $'}</i>
-        <i>${e.companies_count ? `🏭 ${e.companies_count} شركات` : 'لا شركات بعد'}</i></span>
+        <i>${e.companies_count ? `🏭 ${e.companies_count} شركات` : 'لا شركات بعد'}</i>
+        ${e.ai_governed ? '<i>🤖 تُدار بحاكم ذكي</i>' : ''}</span>
       </a>`;
     }).join('') + '</div>';
 }
@@ -2771,7 +2772,7 @@ function advMsgHTML(m) {
 function advRenderModes() {
   const el = document.getElementById('adv-modes');
   if (!el) return;
-  const modes = [[1, 'مستشار', 'يقترح فقط — لا ينفذ'], [2, 'مساعد تنفيذي', 'ينفذ بإذنك دائمًا'], [3, 'مدير مفوض', 'يدير ما تفوّضه تلقائيًا']];
+  const modes = [[1, 'مستشار', 'يقترح فقط — لا ينفذ'], [2, 'مساعد تنفيذي', 'ينفذ بإذنك دائمًا'], [3, 'مدير مفوض', 'تحكم آلي كامل كل شهر لعبة في المجالات المفوَّضة']];
   el.innerHTML = modes.map(([v, t, d]) =>
     `<button class="adv-mode${ADV.modeSel === v ? ' sel' : ''}" onclick="advMode(${v})">${t}<p>${d}</p></button>`).join('');
   const dm = document.getElementById('adv-domains');
