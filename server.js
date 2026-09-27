@@ -455,7 +455,7 @@ app.post('/api/register', ah(async (req, res) => {
     return res.status(400).json({ error: 'اختر الدولة التي ستلعب بها' });
   const dup = await one('SELECT id FROM users WHERE username=$1 OR email=$2', [username, email]);
   if (dup) return res.status(409).json({ error: 'اسم المستخدم أو البريد مسجّل مسبقًا' });
-  const taken = await one("SELECT username FROM users WHERE country_code=$1 AND role NOT IN ('system','developer')", [country_code]);
+  const taken = await one("SELECT username FROM users WHERE country_code=$1 AND role NOT IN ('system','developer','ai_embassy')", [country_code]);
   if (taken) return res.status(409).json({ error: 'هذه الدولة محجوزة مسبقًا من طرف لاعب آخر — اختر دولة أخرى' });
 
   const hash = bcrypt.hashSync(password, 10);
@@ -3526,7 +3526,8 @@ app.get('/api/conversations', ah(auth), ah(async (req, res) => {
 }));
 // محادثة مع مستخدم (وتعليم المقروء)
 app.get('/api/messages/:username', ah(auth), ah(async (req, res) => {
-  const other = await one("SELECT id,username,country_code,avatar FROM users WHERE username=$1 AND role NOT IN ('system','developer')", [req.params.username]);
+  const other = await one("SELECT id,username,country_code,avatar FROM users WHERE username=$1 AND role NOT IN ('system','developer')", [req.params.username])
+    || await one("SELECT id,username,country_code,avatar FROM users WHERE username=$1 AND role='ai_embassy'", [req.params.username]);
   if (!other) return res.status(404).json({ error: 'المستخدم غير موجود' });
   if (other.id === req.user.id) return res.status(400).json({ error: 'لا يمكنك مراسلة نفسك' });
   await q('UPDATE messages SET read_at=$1 WHERE sender_id=$2 AND receiver_id=$3 AND read_at IS NULL', [Date.now(), other.id, req.user.id]);
@@ -3545,10 +3546,112 @@ app.get('/api/messages/:username', ah(auth), ah(async (req, res) => {
     })),
   });
 }));
+// ============================================================================
+// سفارات الدول الذكية — مراسلة الحكام عبر الرسائل
+// لكل دولة ذكية «سفارة» (مستخدم نظام) يرد عليها حاكمها دبلوماسيًا، وأحيانًا
+// بأفعال حقيقية: قبول/اقتراح السلام، معاهدات عدم اعتداء وتجارة.
+// ============================================================================
+const EMBASSY_COOLDOWN_MS = 45000;
+async function ensureAiEmbassy(cc) {
+  const uname = `🤖 ${cname(cc)}`;
+  let u = await one('SELECT * FROM users WHERE username=$1', [uname]);
+  if (!u) {
+    const r = await q(`INSERT INTO users (username,email,password_hash,country_code,role,created_at)
+                       VALUES ($1,$2,'!',$3,'ai_embassy',$4) RETURNING *`,
+      [uname, `ai_${cc}@argos.internal`.toLowerCase(), cc, Date.now()]);
+    u = r.rows[0];
+  }
+  return u;
+}
+async function aiEmbassyActive(cc) {
+  const ai = await one('SELECT enabled FROM ai_nations WHERE country_code=$1', [cc]);
+  if (!ai || !ai.enabled) return false;
+  return !(await aiClaimedSet()).has(cc);
+}
+// قائمة السفارات النشطة
+app.get('/api/ai/embassies', ah(auth), ah(async (req, res) => {
+  const rows = await all(`SELECT country_code, strategy FROM ai_nations WHERE enabled=1 ORDER BY country_code`);
+  const claimed = await aiClaimedSet();
+  const out = [];
+  for (const r of rows) {
+    if (claimed.has(r.country_code)) continue;
+    const u = await ensureAiEmbassy(r.country_code);
+    out.push({ username: u.username, country_code: r.country_code, name: cname(r.country_code), strategy: r.strategy });
+  }
+  res.json(out);
+}));
+// العقل الدبلوماسي: رد نصي + أفعال حقيقية أحيانًا
+async function aiDiplomaticReply(playerCC, aiCC, body) {
+  const strategy = aiStrategyFor(aiCC);
+  const aiName = cname(aiCC);
+  const w = await activeWarBetween(aiCC, playerCC);
+  const t = String(body || '').toLowerCase();
+  const has = (...ws) => ws.some(x => t.includes(x));
+  const flavor = { conservative: 'بحكمة وحذر', balanced: 'بواقعية', expansionist: 'بثقة وكبرياء' }[strategy] || 'بواقعية';
+  const stab = await getEconStat(aiCC, 'stability', 70);
+  let reply;
+  const tryAct = async (fn, okText, failText) => {
+    try { await fn(); return okText; } catch (e) { return failText; }
+  };
+  if (has('سلام', 'صلح', 'هدنة', 'peace', 'paix')) {
+    if (w) {
+      const myDiff = w.attacker_code === aiCC ? Number(w.score_a) - Number(w.score_b) : Number(w.score_b) - Number(w.score_a);
+      const res = await tryAct(() => peaceInternal(w.id, aiCC, AI_ACTOR),
+        myDiff >= 50 ? 'done_win' : 'done', 'fail');
+      if (res === 'done_win') reply = `قبلنا السلام — الحرب انتهت لصالحنا، والتعويضات دُفعت. لنطوِ هذه الصفحة ${flavor}.`;
+      else if (res === 'done') reply = w.proposed_by
+        ? `قبلنا عرض السلام رسميًا — انتهت الحرب بيننا. نتمنى أن تدوم ${flavor}.`
+        : `عرضنا السلام رسميًا على طاولة الحرب — بانتظار قبولكم لإنهاء هذا الصراع ${flavor}.`;
+      else reply = `السلام يحتاج إجراءات رسمية — راجعوا صفحة الحرب، فعرضنا قائم ${flavor}.`;
+    } else {
+      reply = await tryAct(() => proposeTreaty(aiCC, playerCC, 'non_aggression', 0, AI_ACTOR),
+        `السلام غايتنا ${flavor} — أرسلنا لكم معاهدة عدم اعتداء رسمية، وقّعوها ولنبدأ صفحة جديدة.`,
+        `بيننا سلام ومعاهدات سارية — نحرص على استمرارها ${flavor}.`);
+    }
+  } else if (has('تحالف', 'حلف', 'alliance')) {
+    const accept = strategy === 'balanced' && Math.random() < 0.3;
+    reply = accept
+      ? await tryAct(() => proposeTreaty(aiCC, playerCC, 'alliance', 0, AI_ACTOR),
+          `تحالف؟ قرار مدروس ${flavor} — أرسلنا معاهدة تحالف رسمية. التاريخ سيذكر هذا اليوم.`,
+          `ظروفنا لا تسمح بتحالف كامل الآن — لكن عدم الاعتداء بيننا خطوة أولى حكيمة.`)
+      : `نقدّر عرضكم، لكن سياستنا ${flavor} لا تسمح بتحالفات متسرعة — لنبدأ بعدم اعتداء يبني الثقة.`;
+  } else if (has('تجار', 'سوق', 'اقتصاد', 'trade', 'commerce')) {
+    reply = await tryAct(() => proposeTreaty(aiCC, playerCC, 'trade', 0, AI_ACTOR),
+      `التجارة لغة العقلاء — أرسلنا اتفاقية تجارية رسمية. أسواقنا مفتوحة لكم ${flavor}.`,
+      `اتفاقنا التجاري قائم — زوروا السوق وستجدون عروضنا بانتظاركم.`);
+  } else if (has('تهديد', 'سأهاجم', 'سنهاجم', 'احذرو', 'ويلكم', 'سأدمر')) {
+    reply = strategy === 'expansionist'
+      ? `تهديد؟ نحن لا نركع — جيوشنا جاهزة والتاريخ يشهد. فكّروا مليًا قبل أي حماقة.`
+      : `نأسف لهذه اللغة — لكن اعلموا أن دفاعنا صلب، والحرب لن تكون نزهة لأحد ${flavor}.`;
+  } else if (has('شكرا', 'ممتاز', 'أحسنت', 'احسنت', 'صديق', 'أصدقاء')) {
+    reply = `يسعدنا سماع ذلك ${flavor} — الصداقة بين الأمم كنز نحافظ عليه.`;
+  } else if (has('حرب', 'war', 'guerre') && !w) {
+    reply = `الحرب كلمة ثقيلة ${flavor} — نفضل أن نحل خلافاتنا بالحوار والمعاهدات.`;
+  } else {
+    const state = stab < 40 ? ' نمر بظروف داخلية دقيقة، لكن أبوابنا مفتوحة للحوار.' : '';
+    const defs = {
+      conservative: `نستلم رسالتكم وندرسها بحكمة.${state} دولتنا منشغلة ببناء اقتصادها وأمنها — اقترحوا شيئًا ملموسًا كمعاهدة أو تجارة.`,
+      balanced: `رسالتكم وصلت.${state} نحن منفتحون على الحوار — السلام والتجارة لغتنا. اطرحوا ما لديكم بوضوح.`,
+      expansionist: `نتسلم رسالتكم.${state} دولتنا قوية وماضية في طريقها — من يريد الحديث معنا فليأتِ بلغة المصالح.`,
+    };
+    reply = defs[strategy] || defs.balanced;
+  }
+  return reply;
+}
+
 // إرسال رسالة
 app.post('/api/messages', ah(auth), ah(async (req, res) => {
   const { to, body, image } = req.body || {};
-  const other = await one("SELECT id FROM users WHERE username=$1 AND role NOT IN ('system','developer')", [to]);
+  let other = await one("SELECT id,role,country_code FROM users WHERE username=$1 AND role NOT IN ('system','developer','ai_embassy')", [to]);
+  let embassyCC = null;
+  if (!other) {
+    const emb = await one("SELECT id,country_code FROM users WHERE username=$1 AND role='ai_embassy'", [to]);
+    if (emb) {
+      if (!(await aiEmbassyActive(emb.country_code)))
+        return res.status(400).json({ error: 'هذه الدولة أصبحت بيد لاعب — ابحث عنه وراسله مباشرة' });
+      other = emb; embassyCC = emb.country_code;
+    }
+  }
   if (!other) return res.status(404).json({ error: 'المستخدم غير موجود' });
   if (other.id === req.user.id) return res.status(400).json({ error: 'لا يمكنك مراسلة نفسك' });
   const b = String(body || '').trim().slice(0, 1000);
@@ -3558,6 +3661,19 @@ app.post('/api/messages', ah(auth), ah(async (req, res) => {
     'INSERT INTO messages (sender_id,receiver_id,body,image,created_at) VALUES ($1,$2,$3,$4,$5) RETURNING id,created_at',
     [req.user.id, other.id, b, img, Date.now()]
   );
+  // رد الحاكم الذكي — بمهلة لمنع الإغراق
+  if (embassyCC && b) {
+    const last = await one(`SELECT created_at FROM messages WHERE sender_id=$1 AND receiver_id=$2
+                            ORDER BY created_at DESC LIMIT 1`, [other.id, req.user.id]);
+    if (!last || Date.now() - Number(last.created_at) > EMBASSY_COOLDOWN_MS) {
+      try {
+        const reply = await aiDiplomaticReply(req.user.country_code, embassyCC, b);
+        await q('INSERT INTO messages (sender_id,receiver_id,body,created_at) VALUES ($1,$2,$3,$4)',
+          [other.id, req.user.id, reply, Date.now()]);
+        await audit('ai_embassy', AI_ACTOR, `رد سفارة ${cname(embassyCC)} على ${req.user.username}`);
+      } catch (e) { /* الرد تجميلي — لا يفشل الإرسال */ }
+    }
+  }
   res.json({ ok: true, id: r.id, created_at: Number(r.created_at) });
 }));
 // حذف رسالة
@@ -3608,7 +3724,7 @@ function aiStrategyFor(cc) {
   return h % 3 === 0 ? 'conservative' : h % 3 === 1 ? 'balanced' : 'expansionist';
 }
 async function aiClaimedSet() {
-  const rows = await all(`SELECT DISTINCT country_code FROM users WHERE country_code IS NOT NULL`);
+  const rows = await all(`SELECT DISTINCT country_code FROM users WHERE country_code IS NOT NULL AND role NOT IN ('system','developer','ai_embassy')`);
   return new Set(rows.map((r) => r.country_code));
 }
 // الدور الشهري للدول الذكية — يُستدعى من المحرك الشهري لكل شهر لعبة منقضٍ

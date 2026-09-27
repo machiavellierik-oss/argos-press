@@ -763,3 +763,6 @@ body.nav-open .nav-scrim{opacity:1;pointer-events:auto}
   .adv-cards{grid-template-columns:repeat(4,1fr)}
   .adv-domains{grid-template-columns:repeat(3,1fr)}
 }
+
+.emb-head{padding:14px 18px 6px;font-weight:700;color:var(--gold,#c9a227);font-size:14px}
+.emb-av{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:28px;background:#1a2233;flex:none}

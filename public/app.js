@@ -3040,6 +3040,21 @@ async function vMessages() {
     + `<button class="btn" id="newmsg" style="width:auto;padding:10px 24px;margin:12px 18px">✉️ رسالة جديدة</button>
     <div id="convlist"><div class="spin"></div></div>`;
   document.getElementById('newmsg').onclick = openNewMsg;
+  // سفارات الدول الذكية — تحدث مباشرة مع الحكام
+  try {
+    const embs = await api('GET', '/ai/embassies');
+    if (embs.length) {
+      const sec = document.createElement('div');
+      sec.innerHTML = `<div class="emb-head">🏛️ سفارات الدول الذكية — تحدث مع الحكام مباشرة</div>` +
+        embs.map((e) => `
+        <a class="conv" href="#/messages/${encodeURIComponent(e.username)}">
+          <span class="emb-av">🤖</span>
+          <span class="conv-tx"><span class="conv-top"><b class="conv-name">${esc(e.username)}</b></span>
+          <span class="conv-last">${esc(e.name)} — ${e.strategy === 'expansionist' ? 'توسعية' : e.strategy === 'conservative' ? 'محافظة' : 'متوازنة'}</span></span>
+        </a>`).join('');
+      document.getElementById('convlist').before(sec);
+    }
+  } catch (e) { /* صامت */ }
   const load = async () => {
     try {
       const list = await api('GET', '/conversations');
@@ -3121,7 +3136,10 @@ async function vThread(username) {
     try {
       const d = await api('GET', '/messages/' + encodeURIComponent(username));
       if (!document.getElementById('thread')) return;
-      document.getElementById('thuser').innerHTML = `<a class="th-u" href="#/u/${esc(d.user.username)}">
+      const isEmb = d.user.username.startsWith('🤖');
+      document.getElementById('thuser').innerHTML = isEmb
+        ? `<span class="th-u"><span class="emb-av">🤖</span><span class="th-un"><b>${esc(d.user.username)}</b><span class="tw-handle">${esc(countryOf(d.user.country_code).name)} — حاكم ذكي</span></span></span>`
+        : `<a class="th-u" href="#/u/${esc(d.user.username)}">
         ${avHTML(d.user, 40)}<span class="th-un"><b>${esc(d.user.username)}</b><span class="tw-handle">${esc(countryOf(d.user.country_code).name)}</span></span></a>`;
       const msgs = d.messages || [];
       if (first || (msgs.length && msgs[msgs.length - 1].id !== lastId)) {
