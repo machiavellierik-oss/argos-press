@@ -856,6 +856,93 @@ async function seedWar() {
     winner TEXT NOT NULL, region TEXT DEFAULT '',
     game_time BIGINT NOT NULL, created_at BIGINT NOT NULL
   )`);
+  await q(`CREATE TABLE IF NOT EXISTS battle_weapons (
+    id SERIAL PRIMARY KEY, battle_id INTEGER NOT NULL,
+    weapon_id INTEGER, weapon_name TEXT, class TEXT,
+    side TEXT NOT NULL DEFAULT 'attacker',
+    qty INTEGER NOT NULL, lost INTEGER NOT NULL DEFAULT 0
+  )`);
+}
+// قوة النيران لكل صنف سلاح — تُضاف لقوة المعركة فوق قوة الجنود
+const WEAPON_FP = {
+  'بنادق': 1, 'مسدسات': 0.3, 'رشاشات': 6, 'هاونات': 12,
+  'مدفعية ميدانية': 25, 'مدفعية جبلية': 18, 'مدفعية ثقيلة': 40, 'مدفعية حصار': 60,
+  'أسلحة أخرى': 4, 'سفن حربية': 50, 'طيران': 30,
+};
+function weaponFP(cls) { return WEAPON_FP[String(cls || '')] || 0; }
+// أسلحة المدافع التلقائية: أقوى أصناف الترسانة (للمعارك التي يشنها الذكاء)
+// تُرجع [{id, qty}] — qty محدود بسقف perCap، والمخزون غير الموثق (null) يُعامل كـ 40
+async function aiPickWeapons(cc, maxTypes = 3, perCap = 300) {
+  const ws = await all('SELECT id, class, quantity FROM weapons WHERE country_code=$1', [cc]);
+  return ws
+    .map((w) => ({ id: w.id, fp: weaponFP(w.class), avail: w.quantity == null ? 40 : Number(w.quantity) || 0 }))
+    .filter((w) => w.fp > 0 && w.avail > 0)
+    .sort((a, b) => (b.fp * b.avail) - (a.fp * a.avail))
+    .slice(0, maxTypes)
+    .map((w) => ({ id: w.id, qty: Math.min(w.avail, perCap) }));
+}
+// تحقق من أسلحة هجوم اللاعب: ملكية الدولة + سقف المخزون (غير الموثق: 30 للقطعة في المعركة)
+// تُرجع [{id, name, class, qty, fp}] أو ترمي بخطأ عربي
+async function validateBattleWeapons(attackerCC, picks) {
+  const arr = Array.isArray(picks) ? picks : [];
+  if (!arr.length) return [];
+  const ids = [...new Set(arr.map((p) => parseInt(p && p.id, 10)).filter((n) => n > 0))];
+  if (!ids.length) return [];
+  const rows = await all(`SELECT id, country_code, name, class, quantity FROM weapons WHERE id IN (${ids.join(',')})`);
+  const byId = new Map(rows.map((r) => [Number(r.id), r]));
+  const out = [];
+  for (const p of arr) {
+    const id = parseInt(p && p.id, 10);
+    const qty = parseInt(p && p.qty, 10);
+    if (!(id > 0) || !(qty >= 1)) continue;
+    const w = byId.get(id);
+    if (!w) throw { status: 400, message: 'سلاح غير موجود (#' + id + ')' };
+    if (w.country_code !== attackerCC) throw { status: 403, message: 'السلاح "' + (w.name || id) + '" ليس من ترسانة دولتك' };
+    const fp = weaponFP(w.class);
+    if (!(fp > 0)) continue;
+    const cap = w.quantity == null ? 30 : Math.max(0, Number(w.quantity) || 0);
+    if (qty > cap) throw { status: 400, message: `الكمية المطلوبة من "${w.name}" تتجاوز المخزون (${cap})` };
+    const dup = out.find((o) => o.id === id);
+    if (dup) {
+      if (dup.qty + qty > cap) throw { status: 400, message: `الكمية المطلوبة من "${w.name}" تتجاوز المخزون (${cap})` };
+      dup.qty += qty;
+    } else out.push({ id, name: w.name, class: w.class, qty, fp, stockNull: w.quantity == null });
+  }
+  if (out.length > 6) throw { status: 400, message: 'أقصى 6 أصناف أسلحة في المعركة الواحدة' };
+  return out;
+}
+// ---------- منطقية حروب الذكاء الاصطناعي ----------
+// تمنع حروبًا عبثية (سويسرا ضد الهندوراس...): مسافة + قارة + بحرية + حياد سويسرا
+const AI_NEUTRAL = new Set(['CH']); // دول لا يهاجمها الذكاء ولا تهاجم أبدًا
+function capitalDistKm(a, b) {
+  const A = LATLON[a], B = LATLON[b];
+  if (!A || !B) return Infinity;
+  const R = 6371, toR = Math.PI / 180;
+  const dLa = (B[0] - A[0]) * toR, dLo = (B[1] - A[1]) * toR;
+  const h = Math.sin(dLa / 2) ** 2 + Math.cos(A[0] * toR) * Math.cos(B[0] * toR) * Math.sin(dLo / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+async function hasNavy(cc) {
+  const r = await one(`SELECT 1 FROM weapons WHERE country_code=$1 AND class='سفن حربية'
+                       AND (quantity IS NULL OR quantity > 0) LIMIT 1`, [cc]);
+  return !!r;
+}
+// هل حرب الذكاء بين att وdef منطقية جغرافيًا؟ (اللاعبون أحرار — القيد للذكاء فقط)
+async function aiWarPlausible(att, def) {
+  if (!att || !def || att === def) return false;
+  if (AI_NEUTRAL.has(att) || AI_NEUTRAL.has(def)) return false; // سويسرا محايدة دائمًا
+  const sameCont = GEO_CONT[att] && GEO_CONT[att] === GEO_CONT[def];
+  const d = capitalDistKm(att, def);
+  if (sameCont && d <= 2500) return true; // جيران إقليميون
+  const mil = await getArmy(att);
+  const soldiers = Number(mil.soldiers) || 0;
+  if (d <= 5000 && soldiers >= 80000) return true; // قوة عظمى إقليمية
+  if (soldiers >= 100000 && await hasNavy(att)) return true; // قوة بحرية عظمى تعبر البحار
+  return false;
+}
+// حقن للاختبارات فقط (بنفس نمط global.__pool) — تُفعّل بـ ARGOS_TEST=1
+if (process.env.ARGOS_TEST) {
+  global.__argosTest = { aiWarPlausible, capitalDistKm, hasNavy, weaponFP, aiPickWeapons, validateBattleWeapons };
 }
 const numOr = (v, d) => (v == null ? d : Number(v));
 async function getArmy(cc) {
@@ -1011,6 +1098,15 @@ app.get('/api/wars/:id', ah(async (req, res) => {
   const w = await one('SELECT * FROM wars WHERE id=$1', [req.params.id]);
   if (!w) return res.status(404).json({ error: 'الحرب غير موجودة' });
   const battles = await all('SELECT * FROM battles WHERE war_id=$1 ORDER BY id DESC LIMIT 20', [w.id]);
+  let bwByBattle = {};
+  if (battles.length) {
+    const bw = await all(`SELECT * FROM battle_weapons WHERE battle_id IN (${battles.map((b) => parseInt(b.id, 10)).join(',')})`);
+    for (const r of bw) {
+      (bwByBattle[r.battle_id] = bwByBattle[r.battle_id] || []).push({
+        weapon_name: r.weapon_name, class: r.class, side: r.side, qty: r.qty, lost: r.lost,
+      });
+    }
+  }
   res.json({
     war: {
       id: w.id, attacker_code: w.attacker_code, defender_code: w.defender_code,
@@ -1023,6 +1119,7 @@ app.get('/api/wars/:id', ah(async (req, res) => {
       att_losses: b.att_losses, def_losses: b.def_losses, winner: b.winner,
       winner_name: cname(b.winner === 'attacker' ? b.attacker_code : b.defender_code),
       region: b.region, game_time: Number(b.game_time),
+      weapons: bwByBattle[b.id] || [],
     })),
   });
 }));
@@ -1093,7 +1190,8 @@ async function declareWarInternal(attacker, target, actorUsername) {
   return warId;
 }
 // معركة — attackerCC يجب أن يكون الطرف المهاجم في الحرب
-async function battleInternal(warId, attackerCC, units, region, actorUsername) {
+// weaponPick: [{id, qty}] أسلحة المهاجم من ترسانته (اختياري) — المدافع يدعم تلقائيًا من ترسانته
+async function battleInternal(warId, attackerCC, units, region, actorUsername, weaponPick) {
   const w = await one('SELECT * FROM wars WHERE id=$1', [parseInt(warId, 10) || 0]);
   if (!w || w.status !== 'active') throw { status: 404, message: 'لا توجد حرب نشطة بهذا الرقم' };
   if (w.attacker_code !== attackerCC) throw { status: 403, message: 'غير مصرح — المبادرة بالمعارك للطرف المهاجم' };
@@ -1104,9 +1202,21 @@ async function battleInternal(warId, attackerCC, units, region, actorUsername) {
   if (!(units >= 1000)) throw { status: 400, message: 'أقل قوة هجوم لمعركة: 1000 جندي' };
   if (units > maxUnits) throw { status: 400, message: `أقصى قوة لمعركة واحدة: ${maxUnits.toLocaleString('en-US')} جندي (50% من الجيش)` };
   region = String(region || '').slice(0, 60);
+  // أسلحة المهاجم (يختارها اللاعب أو الذكاء) — تُضاف قوة نيرانها فوق قوة الجنود
+  const attW = await validateBattleWeapons(w.attacker_code, weaponPick);
+  const attWPower = attW.reduce((s, x) => s + x.fp * x.qty, 0);
+  // دعم المدافع التلقائي: أقوى 5 أصناف في ترسانته (بنصف الفعالية — أسلحة دفاعية مرتجلة)
+  const defWRows = await all('SELECT id, name, class, quantity FROM weapons WHERE country_code=$1', [w.defender_code]);
+  const defW = defWRows
+    .map((r) => ({ id: Number(r.id), name: r.name, class: r.class, fp: weaponFP(r.class), avail: r.quantity == null ? 40 : Number(r.quantity) || 0, stockNull: r.quantity == null }))
+    .filter((x) => x.fp > 0 && x.avail > 0)
+    .sort((a, b) => (b.fp * b.avail) - (a.fp * a.avail))
+    .slice(0, 5)
+    .map((x) => ({ ...x, qty: Math.min(x.avail, 150) }));
+  const defWPower = defW.reduce((s, x) => s + x.fp * x.qty * 0.5, 0);
   const defUnits = Math.max(500, Math.round(Math.min(defMil.soldiers * 0.6, units * (0.9 + Math.random() * 0.3))));
-  const attP = battlePower(units, attMil);
-  const defP = battlePower(defUnits, defMil) * 1.1;
+  const attP = battlePower(units, attMil) + attWPower;
+  const defP = battlePower(defUnits, defMil) * 1.1 + defWPower;
   const attWins = attP >= defP;
   const winner = attWins ? 'attacker' : 'defender';
   const attLoss = Math.round(units * (attWins ? 0.05 + Math.random() * 0.05 : 0.15 + Math.random() * 0.10));
@@ -1132,16 +1242,34 @@ async function battleInternal(warId, attackerCC, units, region, actorUsername) {
                       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
     [w.id, w.attacker_code, w.defender_code, units, defUnits, Math.round(attP), Math.round(defP),
      attLoss, defLoss, winner, region, g, Date.now()]);
+  const battleId = br.rows[0].id;
+  // خسائر الأسلحة: المنتصر يفقد 5-10%، المنهزم 20-30% — وتُخصم من المخزون الموثق
+  const wLossRate = (win) => win ? 0.05 + Math.random() * 0.05 : 0.20 + Math.random() * 0.10;
+  const recordWeapons = async (list, side, won) => {
+    for (const x of list) {
+      const lost = Math.min(x.qty, Math.round(x.qty * wLossRate(won)));
+      if (lost > 0 && !x.stockNull) await q('UPDATE weapons SET quantity = GREATEST(0, quantity - $1) WHERE id=$2', [lost, x.id]);
+      await q(`INSERT INTO battle_weapons (battle_id, weapon_id, weapon_name, class, side, qty, lost)
+               VALUES ($1,$2,$3,$4,$5,$6,$7)`, [battleId, x.id, x.name, x.class, side, x.qty, lost]);
+    }
+  };
+  await recordWeapons(attW, 'attacker', attWins);
+  await recordWeapons(defW, 'defender', !attWins);
   const wname = attWins ? cname(w.attacker_code) : cname(w.defender_code);
+  const wTxt = attW.length ? ` — بالأسلحة: ${attW.map((x) => x.name + ' ×' + x.qty).join('، ')}` : '';
   await emitEvent('battle', w.attacker_code, w.defender_code,
-    `معركة: ${wname} تنتصر${region ? ' في ' + region : ''} (خسائر المهاجم ${attLoss.toLocaleString('en-US')} / المدافع ${defLoss.toLocaleString('en-US')})`,
-    { war_id: w.id, battle_id: br.rows[0].id });
+    `معركة: ${wname} تنتصر${region ? ' في ' + region : ''} (خسائر المهاجم ${attLoss.toLocaleString('en-US')} / المدافع ${defLoss.toLocaleString('en-US')})${wTxt}`,
+    { war_id: w.id, battle_id: battleId });
   await audit('war_battle', actorUsername, `معركة في حرب #${w.id}: ${units} ضد ${defUnits} — الفائز: ${wname}`);
   await notifyCountry(w.attacker_code, 'battle', attWins ? 'انتصار في المعركة!' : 'هزيمة في المعركة',
     `معركة ${region ? 'في ' + region : ''}: خسائرك ${attLoss.toLocaleString('en-US')} — خسائر العدو ${defLoss.toLocaleString('en-US')}. النقاط: ${nScoreA} مقابل ${nScoreB}.`, '#/news');
   await notifyCountry(w.defender_code, 'battle', attWins ? 'هزيمة في المعركة' : 'انتصار في المعركة!',
     `معركة ${region ? 'في ' + region : ''}: خسائرك ${defLoss.toLocaleString('en-US')} — خسائر العدو ${attLoss.toLocaleString('en-US')}. النقاط: ${nScoreB} مقابل ${nScoreA}.`, '#/news');
-  return { battle_id: br.rows[0].id, winner, winner_name: wname, att_losses: attLoss, def_losses: defLoss, score_a: nScoreA, score_b: nScoreB };
+  return {
+    battle_id: battleId, winner, winner_name: wname,
+    att_losses: attLoss, def_losses: defLoss, score_a: nScoreA, score_b: nScoreB,
+    weapons_used: attW.map((x) => ({ id: x.id, name: x.name, class: x.class, qty: x.qty })),
+  };
 }
 // سلام — يُرجع {enforced,winner,reparations} أو {negotiated} أو {proposed} — يرمي عند الفشل
 async function peaceInternal(warId, meCC, actorUsername, force) {
@@ -1214,7 +1342,7 @@ app.post('/api/war/battle', ah(auth), ah(async (req, res) => {
   if (!w || w.status !== 'active') return res.status(404).json({ error: 'لا توجد حرب نشطة بهذا الرقم' });
   if (!dev && req.user.country_code !== w.attacker_code)
     return res.status(403).json({ error: 'غير مصرح — المبادرة بالمعارك للطرف المهاجم' });
-  const out = await battleInternal(w.id, w.attacker_code, b.units, b.region, req.user.username);
+  const out = await battleInternal(w.id, w.attacker_code, b.units, b.region, req.user.username, b.weapons);
   res.json(Object.assign({ ok: true }, out));
 }));
 // السلام — تفاوضي بموافقة الطرفين، أو مفروض عند تفوق ساحق (فرق 50+ نقطة) مع تعويضات
@@ -3910,6 +4038,7 @@ async function llmGovernTurn(cc, monthIdx) {
     + ' "declare_war": "CODE أو null",\n'
     + ' "reason": "سطر واحد يشرح منطقك"}\n'
     + 'قواعد صارمة: الضريبة المرتفعة تهز الاستقرار. لا تعلن حربًا إلا بتفوق عسكري واضح واستقرار فوق 55. '
+    + 'الحروب المنطقية فقط: نفس قارتك، أو قوة عظمى (80 ألف+ جندي) داخل إقليمك، أو قوة بحرية عظمى (100 ألف+ جندي ببحرية حربية) عبر البحار — سويسرا محايدة دائمًا فلا تهاجمها أبدًا. '
     + 'لا تقترح معاهدة من نوع سارٍ أصلًا مع نفس الدولة. التجسس مكلف وقد يُكشف فيهبط سمعتك.';
   const raw = await llmChat([
     { role: 'system', content: sys },
@@ -3997,7 +4126,7 @@ async function llmGovernTurn(cc, monthIdx) {
       const blocked = await one(`SELECT id FROM treaties WHERE status='active'
         AND ((from_code=$1 AND to_code=$2) OR (from_code=$2 AND to_code=$1))
         AND type IN ('non_aggression','alliance','defensive')`, [cc, tc]);
-      if (ta.soldiers <= mil.soldiers * 0.6 && !blocked && !(await activeWarBetween(cc, tc))) {
+      if (ta.soldiers <= mil.soldiers * 0.6 && !blocked && !(await activeWarBetween(cc, tc)) && await aiWarPlausible(cc, tc)) {
         try { await declareWarInternal(cc, tc, A); notes.push('حرب على ' + cname(tc)); }
         catch (err) { /* رفضها المحرك */ }
       }
@@ -4204,23 +4333,27 @@ async function aiGovern(cc, strategy, actor = AI_ACTOR, domains = null) {
       }
     }
     myWars = await all(`SELECT * FROM wars WHERE status='active' AND (attacker_code=$1 OR defender_code=$1)`, [cc]);
-    // المعارك: دور المهاجم فقط — هجوم شهري محسوب عند الجاهزية الكافية
+    // المعارك: دور المهاجم فقط — هجوم شهري محسوب عند الجاهزية الكافية + أسلحة تلقائية من الترسانة
     for (const w of myWars) {
       if (w.attacker_code !== cc) continue;
       const a2 = await getArmy(cc);
       if (a2.readiness > 45 && a2.soldiers > 8000 && Math.random() < 0.6) {
         const units = Math.min(Math.floor(a2.soldiers * 0.25), 40000);
-        if (units >= 1000) { try { await battleInternal(w.id, cc, units, '', actor); } catch (e) { /* */ } }
+        if (units >= 1000) {
+          try { await battleInternal(w.id, cc, units, '', actor, await aiPickWeapons(cc)); }
+          catch (e) { /* */ }
+        }
       }
     }
-    // إعلان الحرب: التوسعيون (ونادرًا المتوازنون) — بتفوق عددي واضح فقط واحتمال شهري منخفض
+    // إعلان الحرب: التوسعيون (ونادرًا المتوازنون) — بتفوق عددي واضح ومنطقية جغرافية فقط
     const busy = myWars.length > 0;
     if (!busy) {
       const warP = strategy === 'expansionist' ? 0.03 : strategy === 'balanced' ? 0.008 : 0;
       if (Math.random() < warP && stabNow > 55 && wmil.soldiers > 30000 && wmil.readiness > 60) {
-        const pool = COUNTRIES.map(c => c.code).filter(c => c !== cc);
-        for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = pool[i]; pool[i] = pool[j]; pool[j] = t; }
-        for (const t of pool.slice(0, 8)) {
+        const pool = [];
+        for (const c of COUNTRIES) {
+          const t = c.code;
+          if (t === cc) continue;
           if (await activeWarBetween(cc, t)) continue;
           let blocked = false;
           for (const tt of ['non_aggression', 'alliance', 'defensive']) {
@@ -4229,6 +4362,11 @@ async function aiGovern(cc, strategy, actor = AI_ACTOR, domains = null) {
           if (blocked) continue;
           const tm = await getArmy(t);
           if (tm.soldiers > wmil.soldiers * 0.6) continue; // تفوق واضح فقط — لا حروب انتحارية
+          if (!(await aiWarPlausible(cc, t))) continue; // بلا حروب عبثية عبر القارات
+          pool.push({ t, d: capitalDistKm(cc, t) });
+        }
+        pool.sort((a, b) => a.d - b.d); // الأقرب أولًا — الحروب الإقليمية منطقية
+        for (const { t } of pool.slice(0, 5)) {
           try { await declareWarInternal(cc, t, actor); break; } catch (e) { /* جرّب التالي */ }
         }
       }

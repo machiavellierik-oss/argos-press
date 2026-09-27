@@ -2569,10 +2569,16 @@ async function warBattles(id) {
     const d = await api('GET', '/wars/' + id);
     const bs = d.battles || [];
     box.dataset.open = '1';
-    box.innerHTML = bs.length ? '<div class="liq-log">' + bs.map((b) =>
-      `<div class="liq-row"><span class="liq-rs"><b>${esc(b.winner_name || '')}</b>${b.region ? ' · ' + esc(b.region) : ''}
-        <br><span class="hint">القوة <span dir="ltr">${fmtPop(b.att_units)}/${fmtPop(b.def_units)}</span> · الخسائر <span dir="ltr">${fmtPop(b.att_losses)}/${fmtPop(b.def_losses)}</span></span></span>
-      </div>`).join('') + '</div>'
+    const wline = (list, label) => list.length
+      ? `<br><span class="hint">${label}: ${list.map((x) => esc(x.weapon_name) + ' ×' + x.qty + (x.lost ? ` (فُقد ${x.lost})` : '')).join('، ')}</span>` : '';
+    box.innerHTML = bs.length ? '<div class="liq-log">' + bs.map((b) => {
+      const bw = b.weapons || [];
+      return `<div class="liq-row"><span class="liq-rs"><b>${esc(b.winner_name || '')}</b>${b.region ? ' · ' + esc(b.region) : ''}
+        <br><span class="hint">القوة <span dir="ltr">${fmtPop(b.att_units)}/${fmtPop(b.def_units)}</span> · الخسائر <span dir="ltr">${fmtPop(b.att_losses)}/${fmtPop(b.def_losses)}</span></span>`
+        + wline(bw.filter((x) => x.side === 'attacker'), 'أسلحة الهجوم')
+        + wline(bw.filter((x) => x.side === 'defender'), 'أسلحة الدفاع')
+        + `</span></div>`;
+    }).join('') + '</div>'
       : '<p class="hint">لا معارك مسجلة بعد في هذه الحرب.</p>';
   } catch (e) { box.innerHTML = `<p class="hint">${esc(e.message)}</p>`; }
 }
@@ -2583,16 +2589,68 @@ async function warDeclare() {
   try { await api('POST', '/war/declare', { target_code: t }); alert('أُعلنت الحرب'); vWars(); }
   catch (e) { alert(e.message); }
 }
+// قوة النيران لكل صنف سلاح (للعرض — القيم الفعلية تُحسب في السيرفر)
+const WFP = { 'بنادق': 1, 'مسدسات': 0.3, 'رشاشات': 6, 'هاونات': 12, 'مدفعية ميدانية': 25, 'مدفعية جبلية': 18, 'مدفعية ثقيلة': 40, 'مدفعية حصار': 60, 'أسلحة أخرى': 4, 'سفن حربية': 50, 'طيران': 30 };
 async function warBattle(id) {
-  const u = prompt('عدد جنود الهجوم (1000 على الأقل):');
-  if (u == null) return;
-  const units = parseInt(u, 10);
-  if (!(units >= 1000)) { alert('أقل قوة هجوم لمعركة: 1000 جندي'); return; }
-  try {
-    const r = await api('POST', '/war/battle', { war_id: id, units });
-    alert(`انتهت المعركة — المنتصر: ${r.winner_name}\nخسائر المهاجم ${fmtPop(r.att_losses)} · خسائر المدافع ${fmtPop(r.def_losses)}\nالنقاط: ${r.score_a} : ${r.score_b}`);
-    vWars();
-  } catch (e) { alert(e.message); }
+  const myCC = me && me.country_code;
+  if (!myCC) return;
+  let arsenal = [];
+  try { arsenal = ((await api('GET', '/armies/' + myCC)).weapons || []).filter((w) => (WFP[w.class] || 0) > 0); }
+  catch (e) { alert(e.message); return; }
+  const ov = document.createElement('div');
+  ov.className = 'modal-ov';
+  ov.innerHTML = `<div class="modal-card">
+    <div class="m-head"><b>شن معركة — الجنود والأسلحة</b><button class="m-x" id="wbx">✕</button></div>
+    <div class="m-msg"></div>
+    <div class="field"><label>عدد جنود الهجوم (1000 على الأقل)</label>
+      <input id="wbunits" type="number" min="1000" value="5000" dir="ltr"></div>
+    <div class="field"><label>أسلحة الدعم من ترسانتك (اختياري — حتى 6 أصناف)</label>
+      <div id="wbweapons" class="liq-log" style="max-height:260px;overflow:auto">${
+        arsenal.length ? arsenal.map((w) => {
+          const cap = w.quantity == null ? 30 : Math.max(0, w.quantity);
+          return `<div class="liq-row"><span class="liq-rs"><b>${esc(w.name)}</b><br>`
+            + `<span class="hint">${esc(w.class || '')} · قوة النيران ${WFP[w.class]} · المخزون: ${w.quantity == null ? 'غير موثق (30 كحد أقصى)' : w.quantity}</span></span>`
+            + `<input type="number" min="0" max="${cap}" value="0" data-wid="${w.id}" data-wfp="${WFP[w.class]}" data-wcap="${cap}" dir="ltr" style="width:76px" class="wb-qty" title="العدد المُرسل للمعركة"></div>`;
+        }).join('') : '<p class="hint">لا أسلحة في ترسانتك — ستقاتل بالجنود فقط.</p>'
+      }</div></div>
+    <p class="hint" id="wbpower"></p>
+    <div class="me-btns"><button class="btn sm" id="wbfire">شن المعركة</button></div>
+    <p class="hint">الأسلحة المُرسلة تُفقد جزئيًا في المعركة (5-10% للمنتصر، 20-30% للمنهزم) وتُخصم من مخزونك. المدافع يدعم تلقائيًا من ترسانته.</p>
+  </div>`;
+  document.body.appendChild(ov);
+  const m = (t, ok) => { ov.querySelector('.m-msg').innerHTML = t ? `<div class="${ok ? 'okmsg' : 'err'}">${esc(t)}</div>` : ''; };
+  const close = () => ov.remove();
+  ov.onclick = (e) => { if (e.target === ov) close(); };
+  document.getElementById('wbx').onclick = close;
+  const upd = () => {
+    let p = 0;
+    ov.querySelectorAll('.wb-qty').forEach((inp) => {
+      let v = parseInt(inp.value, 10) || 0;
+      const cap = parseInt(inp.dataset.wcap, 10);
+      if (v > cap) { v = cap; inp.value = cap; }
+      if (v < 0) { v = 0; inp.value = 0; }
+      p += v * parseFloat(inp.dataset.wfp);
+    });
+    document.getElementById('wbpower').textContent = p > 0 ? `قوة نيران الأسلحة المختارة: ${Math.round(p).toLocaleString('en-US')}` : '';
+  };
+  ov.querySelectorAll('.wb-qty').forEach((inp) => { inp.oninput = upd; });
+  document.getElementById('wbfire').onclick = async () => {
+    const units = parseInt(document.getElementById('wbunits').value, 10);
+    if (!(units >= 1000)) { m('أقل قوة هجوم لمعركة: 1000 جندي'); return; }
+    const weapons = [];
+    ov.querySelectorAll('.wb-qty').forEach((inp) => {
+      const qv = parseInt(inp.value, 10) || 0;
+      if (qv > 0) weapons.push({ id: parseInt(inp.dataset.wid, 10), qty: qv });
+    });
+    if (weapons.length > 6) { m('أقصى 6 أصناف أسلحة في المعركة الواحدة'); return; }
+    m('جارٍ شن المعركة…', true);
+    try {
+      const r = await api('POST', '/war/battle', { war_id: id, units, weapons });
+      const wu = (r.weapons_used || []).map((x) => `${x.name} ×${x.qty}`).join('، ');
+      alert(`انتهت المعركة — المنتصر: ${r.winner_name}\nخسائر المهاجم ${fmtPop(r.att_losses)} · خسائر المدافع ${fmtPop(r.def_losses)}${wu ? '\nالأسلحة المستخدمة: ' + wu : ''}\nالنقاط: ${r.score_a} : ${r.score_b}`);
+      close(); vWars();
+    } catch (e) { m(e.message, false); }
+  };
 }
 async function warPeace(id) {
   if (!confirm('طلب السلام في هذه الحرب؟ (تفاوضي بموافقة الطرفين، أو مفروض مع تعويضات عند تفوق ساحق)')) return;
