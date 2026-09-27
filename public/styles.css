@@ -657,7 +657,7 @@ body.nav-open .nav-scrim{opacity:1;pointer-events:auto}
   .sidenav{display:block;position:fixed;inset-inline-start:0;top:0;bottom:0;z-index:200;background:var(--bg);
     transform:translateX(105%);transition:transform .25s ease;box-shadow:0 0 40px rgba(0,0,0,.5);
     width:290px;flex-shrink:0;padding:10px 12px;overflow-y:auto;height:100vh}
-  [dir="rtl"] .sidenav{transform:translateX(-105%)}
+  [dir="ltr"] .sidenav{transform:translateX(-105%)}
   body.nav-open .sidenav{transform:translateX(0)}
 }
 /* ===== الضرائب والثورة ===== */
