@@ -584,3 +584,5 @@ button{font-family:inherit;cursor:pointer}
 .wpn-row{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--hover);border-radius:10px}
 .wpn-row-tx{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
 .btn.sm{padding:6px 10px;font-size:.8rem}
+.stat-v{font-weight:700;font-size:1.05rem;color:var(--text)}
+.econ-hero-stats{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}

@@ -207,6 +207,7 @@ async function initDb() {
       [w.cc, w.label, Date.now()]);
   }
   await seedArmies();
+  await seedEconomy();
   const n = await one('SELECT COUNT(*) AS c FROM articles');
   if (Number(n.c) === 0) {
     await q(
@@ -810,6 +811,180 @@ app.put('/api/weapons/:id', ah(auth), requireDeveloper, ah(async (req, res) => {
 // حذف سلاح — المطورون فقط
 app.delete('/api/weapons/:id', ah(auth), requireDeveloper, ah(async (req, res) => {
   await q('DELETE FROM weapons WHERE id=$1', [req.params.id]);
+  res.json({ ok: true });
+}));
+
+// ---------- السكان والاقتصاد 1900 ----------
+// country_economy: عملة كل دولة وقيمتها مقابل الدولار + السكان + الناتج المحلي (بيانات 1900)
+// companies: شركات ينشئها اللاعبون في دولهم (الاسم/القطاع/المدينة/رأس المال)
+const SECTORS = ['صناعية', 'عسكرية', 'تجارية', 'زراعية', 'مالية', 'نقل وشحن', 'تعدين', 'أخرى'];
+async function seedEconomy() {
+  await q(`CREATE TABLE IF NOT EXISTS country_economy (
+    country_code TEXT PRIMARY KEY,
+    currency_name TEXT, currency_code TEXT,
+    units_per_usd DOUBLE PRECISION,
+    currency_confidence TEXT DEFAULT 'unknown', currency_source TEXT, currency_note TEXT,
+    population BIGINT,
+    pop_confidence TEXT DEFAULT 'unknown', pop_source TEXT,
+    gdp_m_intl DOUBLE PRECISION,
+    gdp_confidence TEXT DEFAULT 'unknown', gdp_source TEXT, gdp_note TEXT,
+    updated_by INTEGER, updated_at BIGINT
+  )`);
+  await q(`CREATE TABLE IF NOT EXISTS companies (
+    id SERIAL PRIMARY KEY, country_code TEXT NOT NULL, owner_id INTEGER NOT NULL,
+    name TEXT NOT NULL, sector TEXT NOT NULL, city TEXT,
+    capital DOUBLE PRECISION, description TEXT,
+    created_at BIGINT, updated_at BIGINT
+  )`);
+  await q(`CREATE TABLE IF NOT EXISTS seed_meta (key TEXT PRIMARY KEY, value TEXT)`);
+  const meta = await one("SELECT value FROM seed_meta WHERE key='economy_v1'");
+  if (meta) return;
+  let ECON = [];
+  try { ECON = require('./server/data/economy-1900.json'); } catch (e) { /* بلا بيانات */ }
+  for (const r of ECON) {
+    if (!r || !validCountry(r.country_code)) continue;
+    const ex = await one('SELECT country_code, updated_by FROM country_economy WHERE country_code=$1', [r.country_code]);
+    const vals = [
+      r.country_code,
+      r.currency_name_ar || null, r.currency_code || null,
+      r.units_per_usd == null ? null : Number(r.units_per_usd),
+      r.currency_confidence || 'unknown', r.currency_source || null, r.currency_note || null,
+      r.population_1900 == null ? null : parseInt(r.population_1900, 10),
+      r.pop_confidence || 'unknown', r.pop_source || null,
+      r.gdp_1900_m_intl == null ? null : Number(r.gdp_1900_m_intl),
+      r.gdp_confidence || 'unknown', r.gdp_source || null, r.gdp_note || null,
+      Date.now(),
+    ];
+    if (!ex) {
+      await q(`INSERT INTO country_economy (country_code,currency_name,currency_code,units_per_usd,
+        currency_confidence,currency_source,currency_note,population,pop_confidence,pop_source,
+        gdp_m_intl,gdp_confidence,gdp_source,gdp_note,updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`, vals);
+    } else if (!ex.updated_by) {
+      await q(`UPDATE country_economy SET currency_name=$2,currency_code=$3,units_per_usd=$4,
+        currency_confidence=$5,currency_source=$6,currency_note=$7,population=$8,
+        pop_confidence=$9,pop_source=$10,gdp_m_intl=$11,gdp_confidence=$12,gdp_source=$13,
+        gdp_note=$14,updated_at=$15 WHERE country_code=$1`, vals);
+    }
+  }
+  await q("INSERT INTO seed_meta (key,value) VALUES ('economy_v1','done') ON CONFLICT (key) DO NOTHING");
+}
+function econRow(e) {
+  const pop = e.population == null ? null : Number(e.population);
+  const gdp = e.gdp_m_intl == null ? null : Number(e.gdp_m_intl);
+  return {
+    country_code: e.country_code,
+    currency_name: e.currency_name, currency_code: e.currency_code,
+    units_per_usd: e.units_per_usd == null ? null : Number(e.units_per_usd),
+    currency_confidence: e.currency_confidence, currency_source: e.currency_source, currency_note: e.currency_note,
+    population: pop, pop_confidence: e.pop_confidence, pop_source: e.pop_source,
+    gdp_m_intl: gdp, gdp_confidence: e.gdp_confidence, gdp_source: e.gdp_source, gdp_note: e.gdp_note,
+    gdp_per_capita: (pop && gdp) ? Math.round((gdp * 1e6) / pop) : null,
+  };
+}
+// نظرة عامة: كل الدول + عدد شركات كل دولة — مرجع عام لكل اللاعبين
+app.get('/api/economy', ah(auth), ah(async (req, res) => {
+  const rows = await all('SELECT * FROM country_economy ORDER BY population DESC NULLS LAST');
+  const counts = await all('SELECT country_code, COUNT(*) AS n FROM companies GROUP BY country_code');
+  const cmap = {};
+  for (const c of counts) cmap[c.country_code] = Number(c.n) || 0;
+  res.json({
+    economies: rows.map((r) => ({ ...econRow(r), companies_count: cmap[r.country_code] || 0 })),
+    sectors: SECTORS,
+  });
+}));
+// تفاصيل دولة: بياناتها الاقتصادية + شركاتها
+app.get('/api/economy/:code', ah(auth), ah(async (req, res) => {
+  const cc = String(req.params.code || '').toUpperCase();
+  if (!validCountry(cc)) return res.status(400).json({ error: 'كود دولة غير صالح' });
+  const e = await one('SELECT * FROM country_economy WHERE country_code=$1', [cc]);
+  const cos = await all(`SELECT c.*, u.username AS owner_name FROM companies c
+                         LEFT JOIN users u ON u.id=c.owner_id
+                         WHERE c.country_code=$1 ORDER BY c.created_at DESC`, [cc]);
+  res.json({
+    economy: e ? econRow(e) : null,
+    companies: cos.map((c) => ({
+      id: c.id, country_code: c.country_code, owner_id: c.owner_id, owner_name: c.owner_name,
+      name: c.name, sector: c.sector, city: c.city,
+      capital: c.capital == null ? null : Number(c.capital),
+      description: c.description, created_at: Number(c.created_at),
+    })),
+    sectors: SECTORS,
+  });
+}));
+function cleanCompany(b, forCreate) {
+  const out = {};
+  if (forCreate) {
+    const cc = String(b.country_code || '').toUpperCase();
+    if (!validCountry(cc)) throw new Error('كود دولة غير صالح');
+    out.country_code = cc;
+  }
+  if (typeof b.name !== 'string' || !b.name.trim()) throw new Error('اسم الشركة مطلوب');
+  out.name = b.name.trim().slice(0, 120);
+  if (!SECTORS.includes(b.sector)) throw new Error('اختر قطاعًا صالحًا');
+  out.sector = b.sector;
+  out.city = typeof b.city === 'string' && b.city.trim() ? b.city.trim().slice(0, 120) : null;
+  out.capital = b.capital == null || b.capital === '' ? null : Math.max(0, Number(b.capital) || 0);
+  out.description = typeof b.description === 'string' && b.description.trim() ? b.description.trim().slice(0, 500) : null;
+  return out;
+}
+// إنشاء شركة — كل لاعب في دولته فقط (المطورون: أي دولة)
+app.post('/api/companies', ah(auth), ah(async (req, res) => {
+  let c; try { c = cleanCompany(req.body || {}, true); } catch (e) { return res.status(400).json({ error: e.message }); }
+  const dev = req.user.role === 'developer';
+  if (!dev && c.country_code !== req.user.country_code)
+    return res.status(403).json({ error: 'يمكنك إنشاء شركات في دولتك فقط' });
+  const r = await q(`INSERT INTO companies (country_code,owner_id,name,sector,city,capital,description,created_at,updated_at)
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8) RETURNING id`,
+    [c.country_code, req.user.id, c.name, c.sector, c.city, c.capital, c.description, Date.now()]);
+  res.json({ ok: true, id: r.rows[0].id });
+}));
+// تعديل شركة — مالكها أو المطورون
+app.put('/api/companies/:id', ah(auth), ah(async (req, res) => {
+  const row = await one('SELECT * FROM companies WHERE id=$1', [req.params.id]);
+  if (!row) return res.status(404).json({ error: 'الشركة غير موجودة' });
+  const dev = req.user.role === 'developer';
+  if (!dev && row.owner_id !== req.user.id) return res.status(403).json({ error: 'غير مصرح' });
+  let c; try { c = cleanCompany(req.body || {}, false); } catch (e) { return res.status(400).json({ error: e.message }); }
+  await q(`UPDATE companies SET name=$1,sector=$2,city=$3,capital=$4,description=$5,updated_at=$6 WHERE id=$7`,
+    [c.name, c.sector, c.city, c.capital, c.description, Date.now(), req.params.id]);
+  res.json({ ok: true });
+}));
+// حذف شركة — مالكها أو المطورون
+app.delete('/api/companies/:id', ah(auth), ah(async (req, res) => {
+  const row = await one('SELECT * FROM companies WHERE id=$1', [req.params.id]);
+  if (!row) return res.status(404).json({ error: 'الشركة غير موجودة' });
+  const dev = req.user.role === 'developer';
+  if (!dev && row.owner_id !== req.user.id) return res.status(403).json({ error: 'غير مصرح' });
+  await q('DELETE FROM companies WHERE id=$1', [req.params.id]);
+  res.json({ ok: true });
+}));
+// تعديل بيانات اقتصاد دولة — المطورون فقط
+app.put('/api/economy/:code', ah(auth), requireDeveloper, ah(async (req, res) => {
+  const cc = String(req.params.code || '').toUpperCase();
+  if (!validCountry(cc)) return res.status(400).json({ error: 'كود دولة غير صالح' });
+  const b = req.body || {};
+  const str = (k, n) => typeof b[k] === 'string' && b[k].trim() ? b[k].trim().slice(0, n) : null;
+  const num = (k) => b[k] == null || b[k] === '' ? null : Number(b[k]);
+  const conf = (k) => ['documented', 'estimate', 'unknown'].includes(b[k]) ? b[k] : 'unknown';
+  await q(`INSERT INTO country_economy (country_code,currency_name,currency_code,units_per_usd,
+            currency_confidence,currency_source,currency_note,population,pop_confidence,pop_source,
+            gdp_m_intl,gdp_confidence,gdp_source,gdp_note,updated_by,updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+           ON CONFLICT (country_code) DO UPDATE SET currency_name=EXCLUDED.currency_name,
+             currency_code=EXCLUDED.currency_code, units_per_usd=EXCLUDED.units_per_usd,
+             currency_confidence=EXCLUDED.currency_confidence, currency_source=EXCLUDED.currency_source,
+             currency_note=EXCLUDED.currency_note, population=EXCLUDED.population,
+             pop_confidence=EXCLUDED.pop_confidence, pop_source=EXCLUDED.pop_source,
+             gdp_m_intl=EXCLUDED.gdp_m_intl, gdp_confidence=EXCLUDED.gdp_confidence,
+             gdp_source=EXCLUDED.gdp_source, gdp_note=EXCLUDED.gdp_note,
+             updated_by=EXCLUDED.updated_by, updated_at=EXCLUDED.updated_at`,
+    [cc, str('currency_name', 80), str('currency_code', 12), num('units_per_usd'),
+     conf('currency_confidence'), str('currency_source', 500), str('currency_note', 300),
+     b.population == null || b.population === '' ? null : Math.max(0, parseInt(b.population, 10) || 0),
+     conf('pop_confidence'), str('pop_source', 500),
+     num('gdp_m_intl'), conf('gdp_confidence'), str('gdp_source', 500), str('gdp_note', 300),
+     req.user.id, Date.now()]);
   res.json({ ok: true });
 }));
 

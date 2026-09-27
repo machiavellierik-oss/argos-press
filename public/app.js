@@ -59,6 +59,7 @@ const ICONS = {
   users: I('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-5.5 6.5-5.5s6.5 2 6.5 5.5"/><path d="M15.5 4.7a3.5 3.5 0 0 1 0 6.6M17.3 14.9c2.2.8 3.7 2.4 3.7 5.1"/>'),
   grid: I('<rect x="3.5" y="3.5" width="7" height="7" rx="1"/><rect x="13.5" y="3.5" width="7" height="7" rx="1"/><rect x="3.5" y="13.5" width="7" height="7" rx="1"/><rect x="13.5" y="13.5" width="7" height="7" rx="1"/>'),
   list: I('<path d="M8.5 6H21M8.5 12H21M8.5 18H21"/><circle cx="4.5" cy="6" r="1.3"/><circle cx="4.5" cy="12" r="1.3"/><circle cx="4.5" cy="18" r="1.3"/>'),
+  coin: I('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v9M9.2 9.8c0-1.2 1.2-2 2.8-2s2.8.8 2.8 2-1 1.7-2.8 2.3-2.8 1.1-2.8 2.3 1.2 2.1 2.8 2.1 2.8-.9 2.8-2.1"/>'),
   checkSm: I('<path d="M4.5 12.5l5 5L19.5 7"/>'),
   bookmark: I('<path d="M7 3.5h10a1 1 0 0 1 1 1V21l-6-4.2L6 21V4.5a1 1 0 0 1 1-1z"/>'),
   flame: I('<path d="M12 3.5s5.5 4.8 5.5 10a5.5 5.5 0 0 1-11 0c0-2.2 1.1-4.1 1.1-4.1s.5 1.6 2.1 1.6c-1.1-3.2 2.3-7.5 2.3-7.5z"/>'),
@@ -151,6 +152,7 @@ const NAV = [
   ['#/cat/events', 'أحداث اللعبة', 'cal'],
   ['#/dossiers', 'ملفات العملاء', 'folder'],
   ['#/news', 'غرفة الحرب', 'globe'],
+  ['#/economy', 'الاقتصاد والسكان', 'coin'],
 ];
 function renderNav(active) {
   const nav = document.getElementById('mainnav');
@@ -950,6 +952,128 @@ async function vArmy(code) {
     <a class="btn ghost" href="#/news" style="margin-top:12px">← عودة لغرفة الحرب</a>`;
 }
 // ---------- إدارة الجيوش (المطورون فقط) ----------
+// ======== الاقتصاد والسكان 1900 ========
+const fmtPop = (n) => n == null ? '—' : Number(n).toLocaleString('en-US');
+const fmtGdp = (n) => n == null ? '—' : (Number(n) >= 1000 ? (Number(n) / 1000).toFixed(1) + ' مليار' : Number(n).toFixed(0) + ' مليون');
+const fmtRate = (n) => {
+  if (n == null) return '—';
+  const v = Number(n);
+  if (v === 0) return '0';
+  if (v >= 1000) return v.toLocaleString('en-US', { maximumFractionDigits: 1 });
+  if (v >= 1) return v.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  return v.toPrecision(3);
+};
+// نظرة عامة: كل الدول — السكان والناتج المحلي والعملة وعدد الشركات
+async function vEconomy() {
+  if (!me) { location.hash = '#/login'; return; }
+  app.innerHTML = thead('الاقتصاد والسكان — 1900') + '<div id="econbody"><div class="spin"></div></div>';
+  let d;
+  try { d = await api('GET', '/economy'); }
+  catch (e) { document.getElementById('econbody').innerHTML = '<div class="empty">تعذر التحميل.</div>'; return; }
+  const list = d.economies || [];
+  if (!list.length) { document.getElementById('econbody').innerHTML = '<div class="empty">لا توجد بيانات اقتصادية بعد.</div>'; return; }
+  document.getElementById('econbody').innerHTML = `
+    <p class="hint" style="margin:0 0 12px">بيانات 1900 التاريخية: السكان والناتج المحلي (تقديرات ماديسون بالدولار الدولي 1990) وعملة كل دولة مقابل الدولار — اضغط على أي دولة لعرض شركاتها.</p>
+    <div class="army-grid">` + list.map((e) => {
+      const c = countryOf(e.country_code);
+      const rate = e.units_per_usd == null ? 'بلا عملة وطنية'
+        : `1$ = ${fmtRate(e.units_per_usd)} ${esc(e.currency_code || '')}`;
+      return `<a class="army-card" href="#/economy/${e.country_code}">
+        <span class="war-flag">${c.flag}</span>
+        <span class="army-card-tx"><b>${esc(c.name)}</b>
+        <i>${fmtPop(e.population)} نسمة · ناتج ${fmtGdp(e.gdp_m_intl)}</i>
+        <i>${esc(e.currency_name || '—')} · ${rate}</i>
+        <i>${e.companies_count ? `🏭 ${e.companies_count} شركات` : 'لا شركات بعد'}</i></span>
+      </a>`;
+    }).join('') + '</div>';
+}
+// تفاصيل دولة: العملة والسكان والناتج + شركاتها + إنشاء شركة
+async function vEconomyDetail(code) {
+  code = String(code || '').toUpperCase();
+  if (!me) { location.hash = '#/login'; return; }
+  const c = countryOf(code);
+  const dev = me.role === 'developer';
+  const mine = dev || code === me.country_code;
+  app.innerHTML = thead('اقتصاد ' + c.name) + '<div id="econbody"><div class="spin"></div></div>';
+  let d;
+  try { d = await api('GET', '/economy/' + code); }
+  catch (e) { document.getElementById('econbody').innerHTML = '<div class="empty">تعذر التحميل.</div>'; return; }
+  const e = d.economy, cos = d.companies || [], sectors = d.sectors || [];
+  const rateBox = !e || e.units_per_usd == null
+    ? '<div class="empty">لا توجد عملة وطنية موثقة لهذه الدولة سنة 1900.</div>'
+    : `<div class="map-ed">
+        <div class="field"><label>العملة</label><div class="stat-v">${esc(e.currency_name || '—')} ${e.currency_code ? '(' + esc(e.currency_code) + ')' : ''} ${confBadge(e.currency_confidence)}</div></div>
+        <div class="field"><label>مقابل الدولار الأمريكي</label><div class="stat-v">1$ = ${fmtRate(e.units_per_usd)} ${esc(e.currency_code || '')}</div></div>
+        <div class="field"><label>قيمة الوحدة بالدولار</label><div class="stat-v">${fmtRate(1 / e.units_per_usd)}$</div></div>
+      </div>
+      ${e.currency_note ? `<p class="hint">${esc(e.currency_note)}</p>` : ''}
+      ${e.currency_source ? `<p class="hint"><a href="${esc(e.currency_source)}" target="_blank" rel="noopener" class="wpn-src">المصدر</a></p>` : ''}`;
+  document.getElementById('econbody').innerHTML = `
+    <div class="army-hero"><span class="war-flag big">${c.flag}</span>
+      <div><h2>اقتصاد ${esc(c.name)} — 1900</h2>
+      <p class="army-count">${fmtPop(e ? e.population : null)} نسمة ${e ? confBadge(e.pop_confidence) : ''}</p>
+      <p class="hint">الناتج المحلي: ${fmtGdp(e ? e.gdp_m_intl : null)} دولار دولي (1990) ${e && e.gdp_per_capita ? `· للفرد: ${fmtPop(e.gdp_per_capita)}` : ''} ${e ? confBadge(e.gdp_confidence) : ''}</p>
+      ${e && e.pop_source ? `<p class="hint"><a href="${esc(e.pop_source)}" target="_blank" rel="noopener" class="wpn-src">مصدر السكان</a>${e.gdp_source ? ` · <a href="${esc(e.gdp_source)}" target="_blank" rel="noopener" class="wpn-src">مصدر الناتج</a>` : ''}</p>` : ''}</div></div>
+    <div class="war-sec"><div class="war-sec-t">${ICONS.coin} العملة الوطنية</div>${rateBox}</div>
+    <div class="war-sec"><div class="war-sec-t">🏭 الشركات (${cos.length})</div>
+      ${cos.length ? `<div class="wpn-grid">` + cos.map((o) => `
+        <div class="wpn-card"><div class="wpn-tx"><b>${esc(o.name)}</b>
+          <span>القطاع: ${esc(o.sector)}</span>
+          <span>المقر: ${esc(o.city || '—')}</span>
+          <span>رأس المال: ${o.capital == null ? '—' : fmtRate(o.capital) + ' ' + esc(e && e.currency_code ? e.currency_code : '')}</span>
+          <span class="hint">المالك: ${esc(o.owner_name || '—')}</span>
+          ${o.description ? `<span class="hint">${esc(o.description)}</span>` : ''}
+          ${(dev || o.owner_id === me.id) ? `<span class="me-btns"><button class="btn ghost sm" onclick="coDel(${o.id})">حذف</button></span>` : ''}
+        </div></div>`).join('') + '</div>' : '<div class="empty">لا توجد شركات مسجلة بعد — كن أول من يؤسس شركة في هذه الدولة.</div>'}
+    </div>
+    ${mine ? `<div class="war-sec"><div class="war-sec-t">${ICONS.coin} تأسيس شركة جديدة</div>
+      <div class="map-ed">
+        <div class="field"><label>اسم الشركة</label><input id="co-name" placeholder="مثال: شركة الحديد والصلب الوطنية"></div>
+        <div class="field"><label>القطاع</label><select id="co-sector">${sectors.map((s) => `<option>${esc(s)}</option>`).join('')}</select></div>
+        <div class="field"><label>المدينة / المقر</label><input id="co-city" placeholder="مثال: برلين"></div>
+        <div class="field"><label>رأس المال (بالعملة المحلية)</label><input id="co-capital" type="number" min="0" dir="ltr"></div>
+        <div class="field" style="grid-column:1/-1"><label>وصف النشاط</label><input id="co-desc" placeholder="ماذا تنتج الشركة؟"></div>
+        <div class="me-btns"><button class="btn" onclick="coCreate('${code}')">${ICONS.checkSm} تأسيس الشركة</button></div>
+      </div></div>` : ''}
+    ${dev ? `<div class="war-sec dev-sec"><div class="war-sec-t">${ICONS.gear} تعديل بيانات الدولة — المطورون فقط</div>
+      <div class="map-ed">
+        <div class="field"><label>العملة (عربي)</label><input id="ec-cur" value="${esc(e && e.currency_name ? e.currency_name : '')}"></div>
+        <div class="field"><label>رمز العملة</label><input id="ec-curcode" dir="ltr" value="${esc(e && e.currency_code ? e.currency_code : '')}"></div>
+        <div class="field"><label>وحدات العملة = 1 دولار</label><input id="ec-rate" type="number" step="any" min="0" dir="ltr" value="${e && e.units_per_usd != null ? e.units_per_usd : ''}"></div>
+        <div class="field"><label>السكان (1900)</label><input id="ec-pop" type="number" min="0" dir="ltr" value="${e && e.population != null ? e.population : ''}"></div>
+        <div class="field"><label>الناتج (مليون دولار دولي)</label><input id="ec-gdp" type="number" step="any" min="0" dir="ltr" value="${e && e.gdp_m_intl != null ? e.gdp_m_intl : ''}"></div>
+        <div class="me-btns"><button class="btn" onclick="ecSave('${code}')">حفظ</button></div>
+      </div></div>` : ''}
+    <a class="btn ghost" href="#/economy" style="margin-top:12px">← عودة للاقتصاد والسكان</a>`;
+}
+async function coCreate(code) {
+  const body = {
+    country_code: code,
+    name: document.getElementById('co-name').value.trim(),
+    sector: document.getElementById('co-sector').value,
+    city: document.getElementById('co-city').value.trim(),
+    capital: document.getElementById('co-capital').value,
+    description: document.getElementById('co-desc').value.trim(),
+  };
+  if (!body.name) return toast('اكتب اسم الشركة أولاً');
+  try { await api('POST', '/companies', body); toast('تم تأسيس الشركة 🏭'); vEconomyDetail(code); }
+  catch (e) { toast(e.message || 'فشل التأسيس'); }
+}
+async function coDel(id) {
+  if (!confirm('حذف هذه الشركة نهائيًا؟')) return;
+  try { await api('DELETE', '/companies/' + id); toast('تم الحذف'); route(); }
+  catch (e) { toast(e.message || 'فشل الحذف'); }
+}
+async function ecSave(code) {
+  const v = (id) => document.getElementById(id).value.trim();
+  try {
+    await api('PUT', '/economy/' + code, {
+      currency_name: v('ec-cur'), currency_code: v('ec-curcode'), units_per_usd: v('ec-rate'),
+      population: v('ec-pop'), gdp_m_intl: v('ec-gdp'),
+    });
+    toast('تم الحفظ'); vEconomyDetail(code);
+  } catch (e) { toast(e.message || 'فشل الحفظ'); }
+}
 async function renderArmyManager() {
   const el = document.getElementById('armymgr'); if (!el) return;
   let list = [];
@@ -1905,7 +2029,8 @@ async function vUser(username) {
 function navKey(h) {
   if (h === '#/' || h === '') return '#/';
   if (h.startsWith('#/cat/')) return '#/cat/' + h.split('/')[2];
-  if (h === '#/dispatches' || h === '#/dossiers' || h === '#/news' || h === '#/dash' || h === '#/login' || h === '#/messages') return h;
+  if (h === '#/dispatches' || h === '#/dossiers' || h === '#/news' || h === '#/economy' || h === '#/dash' || h === '#/login' || h === '#/messages') return h;
+  if (h.startsWith('#/economy/')) return '#/economy';
   if (h.startsWith('#/messages/')) return '#/messages';
   if (h.startsWith('#/d/')) return '#/dispatches';
   return null;
@@ -1925,6 +2050,8 @@ async function route() {
     else if (h === '#/dispatches') await vDispatches();
     else if (h === '#/dossiers') await vDossiers();
     else if (h === '#/news') await vNews();
+    else if (h === '#/economy') await vEconomy();
+    else if (h.startsWith('#/economy/')) await vEconomyDetail(h.split('/')[2]);
     else if (h.startsWith('#/army/')) await vArmy(h.split('/')[2]);
     else if (h.startsWith('#/dossier/')) await vDossier(decodeURIComponent(h.split('/')[2] || ''));
     else if (h === '#/login') vLogin();
