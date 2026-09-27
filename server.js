@@ -814,10 +814,50 @@ app.delete('/api/weapons/:id', ah(auth), requireDeveloper, ah(async (req, res) =
   res.json({ ok: true });
 }));
 
-// ---------- السكان والاقتصاد 1900 ----------
-// country_economy: عملة كل دولة وقيمتها مقابل الدولار + السكان + الناتج المحلي (بيانات 1900)
-// companies: شركات ينشئها اللاعبون في دولهم (الاسم/القطاع/المدينة/رأس المال)
+// ---------- السكان والاقتصاد 1900 + الشركات + سوق السلاح ----------
+// country_economy: عملة كل دولة وقيمتها مقابل الدولار + السكان + الناتج المحلي + السيولة (بيانات 1900)
+// companies: شركات وطنية (مقرها في مدن دولتها) ودولية (بموافقة الدولة المضيفة)
+// notifications: إشعارات (طلبات الشركات/الموافقات/سوق السلاح)
+// market_listings + market_orders: بيع وشراء الأسلحة بين الدول مع مدة تسليم بزمن اللعبة
 const SECTORS = ['صناعية', 'عسكرية', 'تجارية', 'زراعية', 'مالية', 'نقل وشحن', 'تعدين', 'أخرى'];
+let GEO_CITIES = {}, GEO_CONT = {};
+try { GEO_CITIES = require('./server/data/cities-1900.json'); } catch (e) { /* بلا ملف مدن */ }
+try { GEO_CONT = require('./server/data/continents.json'); } catch (e) { /* بلا ملف قارات */ }
+const citiesOf = (cc) => (GEO_CITIES && GEO_CITIES[cc]) || [];
+const continentOf = (cc) => (GEO_CONT && GEO_CONT[cc]) || null;
+const cname = (cc) => { const c = COUNTRIES.find((x) => x.code === cc); return c ? c.name : cc; };
+const canSeeAllEcon = (u) => u && (isDeveloper(u) || isStaff(u));
+const GAME_DAY_MS = 4 * 60 * 1000; // يوم اللعبة = 4 دقائق حقيقية (ساعتان حقيقيتان = شهر لعبة من 30 يومًا)
+function deliveryGameDays(buyerCC, sellerCC) {
+  const a = continentOf(buyerCC), b = continentOf(sellerCC);
+  if (a && b && a === b) return 5 + Math.floor(Math.random() * 3); // نفس القارة: 5-7 أيام
+  return 15; // قارتان مختلفتان: 15 يومًا
+}
+async function notify(userId, ntype, title, body, link) {
+  if (!userId) return;
+  await q(`INSERT INTO notifications (user_id,ntype,title,body,link,created_at) VALUES ($1,$2,$3,$4,$5,$6)`,
+    [userId, ntype, title, body, link || null, Date.now()]);
+}
+async function ownersOf(cc) {
+  const rows = await all(`SELECT id FROM users WHERE country_code=$1 AND role='player' AND COALESCE(banned,0)=0`, [cc]);
+  return rows.map((r) => r.id);
+}
+async function devIds() {
+  const rows = await all(`SELECT id FROM users WHERE role='developer'`);
+  return rows.map((r) => r.id);
+}
+async function deductLiquidity(cc, amountUsd) {
+  if (!(amountUsd > 0)) return true;
+  const e = await one('SELECT liquidity_m_usd FROM country_economy WHERE country_code=$1', [cc]);
+  const cur = e && e.liquidity_m_usd != null ? Number(e.liquidity_m_usd) : 0;
+  if (cur < amountUsd) return false;
+  await q('UPDATE country_economy SET liquidity_m_usd = liquidity_m_usd - $2 WHERE country_code=$1', [cc, amountUsd]);
+  return true;
+}
+async function addLiquidity(cc, amountUsd) {
+  if (!(amountUsd > 0)) return;
+  await q('UPDATE country_economy SET liquidity_m_usd = COALESCE(liquidity_m_usd,0) + $2 WHERE country_code=$1', [cc, amountUsd]);
+}
 async function seedEconomy() {
   await q(`CREATE TABLE IF NOT EXISTS country_economy (
     country_code TEXT PRIMARY KEY,
@@ -828,6 +868,8 @@ async function seedEconomy() {
     pop_confidence TEXT DEFAULT 'unknown', pop_source TEXT,
     gdp_m_intl DOUBLE PRECISION,
     gdp_confidence TEXT DEFAULT 'unknown', gdp_source TEXT, gdp_note TEXT,
+    liquidity_m_usd DOUBLE PRECISION,
+    liquidity_confidence TEXT DEFAULT 'unknown', liquidity_source TEXT, liquidity_note TEXT,
     updated_by INTEGER, updated_at BIGINT
   )`);
   await q(`CREATE TABLE IF NOT EXISTS companies (
@@ -836,42 +878,88 @@ async function seedEconomy() {
     capital DOUBLE PRECISION, description TEXT,
     created_at BIGINT, updated_at BIGINT
   )`);
+  await q(`CREATE TABLE IF NOT EXISTS notifications (
+    id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL,
+    ntype TEXT, title TEXT, body TEXT, link TEXT,
+    is_read BOOLEAN DEFAULT FALSE, created_at BIGINT
+  )`);
+  await q(`CREATE TABLE IF NOT EXISTS market_listings (
+    id SERIAL PRIMARY KEY, seller_id INTEGER NOT NULL, seller_country TEXT NOT NULL,
+    weapon_id INTEGER NOT NULL, qty INTEGER NOT NULL,
+    price_unit_m_usd DOUBLE PRECISION NOT NULL,
+    status TEXT DEFAULT 'active', created_at BIGINT
+  )`);
+  await q(`CREATE TABLE IF NOT EXISTS market_orders (
+    id SERIAL PRIMARY KEY, listing_id INTEGER NOT NULL, weapon_id INTEGER NOT NULL,
+    seller_id INTEGER NOT NULL, seller_country TEXT NOT NULL,
+    buyer_id INTEGER NOT NULL, buyer_country TEXT NOT NULL,
+    qty INTEGER NOT NULL, total_m_usd DOUBLE PRECISION NOT NULL,
+    game_days INTEGER NOT NULL,
+    status TEXT DEFAULT 'in_transit', deliver_at BIGINT, created_at BIGINT
+  )`);
+  // ترقية قواعد البيانات القديمة
+  for (const colDef of [
+    'liquidity_m_usd DOUBLE PRECISION',
+    "liquidity_confidence TEXT DEFAULT 'unknown'",
+    'liquidity_source TEXT', 'liquidity_note TEXT',
+  ]) { try { await q(`ALTER TABLE country_economy ADD COLUMN ${colDef}`); } catch (e) { /* موجود */ } }
+  for (const colDef of [
+    "ctype TEXT DEFAULT 'national'", "status TEXT DEFAULT 'approved'",
+    'host_country TEXT', 'capital_usd DOUBLE PRECISION',
+  ]) { try { await q(`ALTER TABLE companies ADD COLUMN ${colDef}`); } catch (e) { /* موجود */ } }
+  await q(`UPDATE companies SET host_country=country_code WHERE host_country IS NULL`);
+  await q(`UPDATE companies SET capital_usd=capital WHERE capital_usd IS NULL`);
   await q(`CREATE TABLE IF NOT EXISTS seed_meta (key TEXT PRIMARY KEY, value TEXT)`);
   const meta = await one("SELECT value FROM seed_meta WHERE key='economy_v1'");
-  if (meta) return;
   let ECON = [];
   try { ECON = require('./server/data/economy-1900.json'); } catch (e) { /* بلا بيانات */ }
-  for (const r of ECON) {
-    if (!r || !validCountry(r.country_code)) continue;
-    const ex = await one('SELECT country_code, updated_by FROM country_economy WHERE country_code=$1', [r.country_code]);
-    const vals = [
-      r.country_code,
-      r.currency_name_ar || null, r.currency_code || null,
-      r.units_per_usd == null ? null : Number(r.units_per_usd),
-      r.currency_confidence || 'unknown', r.currency_source || null, r.currency_note || null,
-      r.population_1900 == null ? null : parseInt(r.population_1900, 10),
-      r.pop_confidence || 'unknown', r.pop_source || null,
-      r.gdp_1900_m_intl == null ? null : Number(r.gdp_1900_m_intl),
-      r.gdp_confidence || 'unknown', r.gdp_source || null, r.gdp_note || null,
-      Date.now(),
-    ];
-    if (!ex) {
-      await q(`INSERT INTO country_economy (country_code,currency_name,currency_code,units_per_usd,
-        currency_confidence,currency_source,currency_note,population,pop_confidence,pop_source,
-        gdp_m_intl,gdp_confidence,gdp_source,gdp_note,updated_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`, vals);
-    } else if (!ex.updated_by) {
-      await q(`UPDATE country_economy SET currency_name=$2,currency_code=$3,units_per_usd=$4,
-        currency_confidence=$5,currency_source=$6,currency_note=$7,population=$8,
-        pop_confidence=$9,pop_source=$10,gdp_m_intl=$11,gdp_confidence=$12,gdp_source=$13,
-        gdp_note=$14,updated_at=$15 WHERE country_code=$1`, vals);
+  if (!meta) {
+    for (const r of ECON) {
+      if (!r || !validCountry(r.country_code)) continue;
+      const ex = await one('SELECT country_code, updated_by FROM country_economy WHERE country_code=$1', [r.country_code]);
+      const vals = [
+        r.country_code,
+        r.currency_name_ar || null, r.currency_code || null,
+        r.units_per_usd == null ? null : Number(r.units_per_usd),
+        r.currency_confidence || 'unknown', r.currency_source || null, r.currency_note || null,
+        r.population_1900 == null ? null : parseInt(r.population_1900, 10),
+        r.pop_confidence || 'unknown', r.pop_source || null,
+        r.gdp_1900_m_intl == null ? null : Number(r.gdp_1900_m_intl),
+        r.gdp_confidence || 'unknown', r.gdp_source || null, r.gdp_note || null,
+        r.liquidity_m_usd == null ? null : Number(r.liquidity_m_usd),
+        r.liquidity_confidence || 'unknown', r.liquidity_source || null, r.liquidity_note || null,
+        Date.now(),
+      ];
+      if (!ex) {
+        await q(`INSERT INTO country_economy (country_code,currency_name,currency_code,units_per_usd,
+          currency_confidence,currency_source,currency_note,population,pop_confidence,pop_source,
+          gdp_m_intl,gdp_confidence,gdp_source,gdp_note,
+          liquidity_m_usd,liquidity_confidence,liquidity_source,liquidity_note,updated_at)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`, vals);
+      } else if (!ex.updated_by) {
+        await q(`UPDATE country_economy SET currency_name=$2,currency_code=$3,units_per_usd=$4,
+          currency_confidence=$5,currency_source=$6,currency_note=$7,population=$8,
+          pop_confidence=$9,pop_source=$10,gdp_m_intl=$11,gdp_confidence=$12,gdp_source=$13,
+          gdp_note=$14,liquidity_m_usd=$15,liquidity_confidence=$16,liquidity_source=$17,
+          liquidity_note=$18,updated_at=$19 WHERE country_code=$1`, vals);
+      }
     }
+    await q("INSERT INTO seed_meta (key,value) VALUES ('economy_v1','done') ON CONFLICT (key) DO NOTHING");
   }
-  await q("INSERT INTO seed_meta (key,value) VALUES ('economy_v1','done') ON CONFLICT (key) DO NOTHING");
+  // تعبئة السيولة للصفوف القديمة التي لم يمسسها المطور (لا تمس أي تعديل يدوي)
+  for (const r of ECON) {
+    if (!r || r.liquidity_m_usd == null) continue;
+    await q(`UPDATE country_economy SET liquidity_m_usd=$2, liquidity_confidence=$3,
+             liquidity_source=$4, liquidity_note=$5
+             WHERE country_code=$1 AND liquidity_m_usd IS NULL`,
+      [r.country_code, Number(r.liquidity_m_usd), r.liquidity_confidence || 'estimate',
+       r.liquidity_source || null, r.liquidity_note || null]);
+  }
 }
 function econRow(e) {
   const pop = e.population == null ? null : Number(e.population);
   const gdp = e.gdp_m_intl == null ? null : Number(e.gdp_m_intl);
+  const liq = e.liquidity_m_usd == null ? null : Number(e.liquidity_m_usd);
   return {
     country_code: e.country_code,
     currency_name: e.currency_name, currency_code: e.currency_code,
@@ -880,112 +968,370 @@ function econRow(e) {
     population: pop, pop_confidence: e.pop_confidence, pop_source: e.pop_source,
     gdp_m_intl: gdp, gdp_confidence: e.gdp_confidence, gdp_source: e.gdp_source, gdp_note: e.gdp_note,
     gdp_per_capita: (pop && gdp) ? Math.round((gdp * 1e6) / pop) : null,
+    liquidity_m_usd: liq, liquidity_confidence: e.liquidity_confidence,
+    liquidity_source: e.liquidity_source, liquidity_note: e.liquidity_note,
   };
 }
-// نظرة عامة: كل الدول + عدد شركات كل دولة — مرجع عام لكل اللاعبين
+function companyRow(c) {
+  return {
+    id: c.id, country_code: c.country_code, host_country: c.host_country,
+    owner_id: c.owner_id, owner_name: c.owner_name,
+    ctype: c.ctype || 'national', status: c.status || 'approved',
+    name: c.name, sector: c.sector, city: c.city,
+    capital: c.capital == null ? null : Number(c.capital),
+    capital_usd: c.capital_usd == null ? null : Number(c.capital_usd),
+    description: c.description, created_at: Number(c.created_at),
+  };
+}
+// بيانات جغرافية للنماذج (مدن كل دولة + قارتها)
+app.get('/api/meta/geo', ah(auth), ah(async (req, res) => {
+  res.json({ cities: GEO_CITIES, continents: GEO_CONT });
+}));
+// نظرة عامة — كل لاعب يرى اقتصاد دولته فقط (المطورون والإدارة يرون الكل)
 app.get('/api/economy', ah(auth), ah(async (req, res) => {
-  const rows = await all('SELECT * FROM country_economy ORDER BY population DESC NULLS LAST');
-  const counts = await all('SELECT country_code, COUNT(*) AS n FROM companies GROUP BY country_code');
+  const full = canSeeAllEcon(req.user);
+  const rows = full
+    ? await all('SELECT * FROM country_economy ORDER BY population DESC NULLS LAST')
+    : await all('SELECT * FROM country_economy WHERE country_code=$1', [req.user.country_code]);
+  const counts = await all(`SELECT host_country AS country_code, COUNT(*) AS n FROM companies
+                            WHERE status='approved' GROUP BY host_country`);
   const cmap = {};
   for (const c of counts) cmap[c.country_code] = Number(c.n) || 0;
   res.json({
     economies: rows.map((r) => ({ ...econRow(r), companies_count: cmap[r.country_code] || 0 })),
-    sectors: SECTORS,
+    sectors: SECTORS, full,
   });
 }));
-// تفاصيل دولة: بياناتها الاقتصادية + شركاتها
+// تفاصيل دولة — اقتصاد دولتك فقط (أو الكل للمطورين/الإدارة)
 app.get('/api/economy/:code', ah(auth), ah(async (req, res) => {
   const cc = String(req.params.code || '').toUpperCase();
   if (!validCountry(cc)) return res.status(400).json({ error: 'كود دولة غير صالح' });
+  if (!canSeeAllEcon(req.user) && cc !== req.user.country_code)
+    return res.status(403).json({ error: 'يمكنك رؤية اقتصاد دولتك فقط' });
   const e = await one('SELECT * FROM country_economy WHERE country_code=$1', [cc]);
   const cos = await all(`SELECT c.*, u.username AS owner_name FROM companies c
                          LEFT JOIN users u ON u.id=c.owner_id
-                         WHERE c.country_code=$1 ORDER BY c.created_at DESC`, [cc]);
+                         WHERE c.host_country=$1 ORDER BY c.created_at DESC`, [cc]);
+  const mine = await all(`SELECT c.*, u.username AS owner_name FROM companies c
+                          LEFT JOIN users u ON u.id=c.owner_id
+                          WHERE c.owner_id=$1 AND c.host_country!=$2 ORDER BY c.created_at DESC`,
+    [req.user.id, cc]);
   res.json({
     economy: e ? econRow(e) : null,
-    companies: cos.map((c) => ({
-      id: c.id, country_code: c.country_code, owner_id: c.owner_id, owner_name: c.owner_name,
-      name: c.name, sector: c.sector, city: c.city,
-      capital: c.capital == null ? null : Number(c.capital),
-      description: c.description, created_at: Number(c.created_at),
-    })),
-    sectors: SECTORS,
+    companies: cos.map(companyRow),
+    my_companies_abroad: mine.map(companyRow),
+    sectors: SECTORS, cities: citiesOf(cc),
+    full: canSeeAllEcon(req.user),
   });
 }));
-function cleanCompany(b, forCreate) {
+function cleanCompany(b, founderCC) {
   const out = {};
-  if (forCreate) {
-    const cc = String(b.country_code || '').toUpperCase();
-    if (!validCountry(cc)) throw new Error('كود دولة غير صالح');
-    out.country_code = cc;
-  }
   if (typeof b.name !== 'string' || !b.name.trim()) throw new Error('اسم الشركة مطلوب');
   out.name = b.name.trim().slice(0, 120);
   if (!SECTORS.includes(b.sector)) throw new Error('اختر قطاعًا صالحًا');
   out.sector = b.sector;
-  out.city = typeof b.city === 'string' && b.city.trim() ? b.city.trim().slice(0, 120) : null;
-  out.capital = b.capital == null || b.capital === '' ? null : Math.max(0, Number(b.capital) || 0);
+  const ctype = b.ctype === 'international' ? 'international' : 'national';
+  out.ctype = ctype;
+  let hostCC = founderCC;
+  if (ctype === 'international') {
+    hostCC = String(b.host_country || '').toUpperCase();
+    if (!validCountry(hostCC)) throw new Error('اختر الدولة المضيفة');
+    if (hostCC === founderCC) throw new Error('الشركة الدولية يجب أن تُبنى خارج دولتك — اختر «وطنية» لداخل دولتك');
+  }
+  out.host_country = hostCC;
+  const city = typeof b.city === 'string' ? b.city.trim().slice(0, 120) : '';
+  if (!city) throw new Error('اختر مدينة المقر');
+  const list = citiesOf(hostCC);
+  if (list.length && !list.includes(city)) throw new Error('المدينة يجب أن تكون من مدن ' + cname(hostCC));
+  out.city = city;
+  const capLocal = Number(b.capital);
+  if (!(capLocal > 0)) throw new Error('رأس المال مطلوب (بملايين عملة الدولة المضيفة)');
+  out.capital = capLocal;
   out.description = typeof b.description === 'string' && b.description.trim() ? b.description.trim().slice(0, 500) : null;
   return out;
 }
-// إنشاء شركة — كل لاعب في دولته فقط (المطورون: أي دولة)
+// إنشاء شركة — وطنية: مقرها في مدن دولتك فقط وتُخصم فورًا | دولية: بموافقة الدولة المضيفة
 app.post('/api/companies', ah(auth), ah(async (req, res) => {
-  let c; try { c = cleanCompany(req.body || {}, true); } catch (e) { return res.status(400).json({ error: e.message }); }
-  const dev = req.user.role === 'developer';
-  if (!dev && c.country_code !== req.user.country_code)
-    return res.status(403).json({ error: 'يمكنك إنشاء شركات في دولتك فقط' });
-  const r = await q(`INSERT INTO companies (country_code,owner_id,name,sector,city,capital,description,created_at,updated_at)
-                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8) RETURNING id`,
-    [c.country_code, req.user.id, c.name, c.sector, c.city, c.capital, c.description, Date.now()]);
-  res.json({ ok: true, id: r.rows[0].id });
+  const dev = isDeveloper(req.user);
+  const b = req.body || {};
+  let founderCC = req.user.country_code;
+  if (dev && b.country_code) {
+    const cc = String(b.country_code).toUpperCase();
+    if (!validCountry(cc)) return res.status(400).json({ error: 'كود دولة غير صالح' });
+    founderCC = cc;
+  }
+  if (!founderCC) return res.status(400).json({ error: 'لا توجد دولة مرتبطة بحسابك' });
+  let c; try { c = cleanCompany(b, founderCC); } catch (e) { return res.status(400).json({ error: e.message }); }
+  const erow = await one('SELECT units_per_usd, currency_code FROM country_economy WHERE country_code=$1', [c.host_country]);
+  const rate = erow && erow.units_per_usd ? Number(erow.units_per_usd) : 1;
+  const capUsd = c.capital / rate;
+  const status = (c.ctype === 'international' && !dev) ? 'pending' : 'approved';
+  if (status === 'approved') {
+    const ok = await deductLiquidity(c.host_country, capUsd);
+    if (!ok) return res.status(400).json({ error: 'سيولة ' + cname(c.host_country) + ' لا تكفي لرأس المال المطلوب' });
+  }
+  const r = await q(`INSERT INTO companies (country_code,host_country,owner_id,ctype,status,name,sector,city,
+                     capital,capital_usd,description,created_at,updated_at)
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12) RETURNING id`,
+    [founderCC, c.host_country, req.user.id, c.ctype, status, c.name, c.sector, c.city,
+     c.capital, capUsd, c.description, Date.now()]);
+  const id = r.rows[0].id;
+  if (status === 'pending') {
+    const owners = await ownersOf(c.host_country);
+    const targets = owners.length ? owners : await devIds();
+    const curName = erow && erow.currency_code ? erow.currency_code : 'دولار';
+    for (const uid of targets) {
+      await notify(uid, 'company_request',
+        `طلب شركة دولية في ${cname(c.host_country)}`,
+        `${req.user.username} (${cname(founderCC)}) يطلب تأسيس شركة دولية «${c.name}» في ${c.city} برأس مال ${c.capital} مليون ${curName} (~${Math.round(capUsd)} مليون دولار). القرار لك: موافقة أم رفض.`,
+        `#/economy/${c.host_country}`);
+    }
+  }
+  res.json({ ok: true, id, status });
 }));
-// تعديل شركة — مالكها أو المطورون
+// طلبات الشركات الدولية المعلقة — صاحب الدولة المضيفة أو المطورون
+app.get('/api/companies/pending', ah(auth), ah(async (req, res) => {
+  const dev = isDeveloper(req.user);
+  const rows = dev
+    ? await all(`SELECT c.*, u.username AS owner_name FROM companies c LEFT JOIN users u ON u.id=c.owner_id
+                 WHERE c.status='pending' ORDER BY c.created_at DESC`)
+    : await all(`SELECT c.*, u.username AS owner_name FROM companies c LEFT JOIN users u ON u.id=c.owner_id
+                 WHERE c.status='pending' AND c.host_country=$1 ORDER BY c.created_at DESC`, [req.user.country_code]);
+  res.json({ pending: rows.map(companyRow) });
+}));
+// الموافقة على شركة دولية — صاحب الدولة المضيفة أو المطورون (يُخصم رأس المال من سيولة الدولة المضيفة)
+app.post('/api/companies/:id/approve', ah(auth), ah(async (req, res) => {
+  const row = await one('SELECT * FROM companies WHERE id=$1', [req.params.id]);
+  if (!row) return res.status(404).json({ error: 'الشركة غير موجودة' });
+  if (row.status !== 'pending') return res.status(400).json({ error: 'الطلب ليس معلقًا' });
+  const dev = isDeveloper(req.user);
+  if (!dev && req.user.country_code !== row.host_country)
+    return res.status(403).json({ error: 'الموافقة لصاحب الدولة المضيفة فقط' });
+  const ok = await deductLiquidity(row.host_country, Number(row.capital_usd) || 0);
+  if (!ok) return res.status(400).json({ error: 'سيولة ' + cname(row.host_country) + ' لا تكفي لرأس مال الشركة' });
+  await q(`UPDATE companies SET status='approved', updated_at=$2 WHERE id=$1`, [req.params.id, Date.now()]);
+  await notify(row.owner_id, 'company_decision',
+    `تمت الموافقة على شركتك «${row.name}»`,
+    `${cname(row.host_country)} وافقت على تأسيس شركتك الدولية في ${row.city}.`,
+    `#/economy/${row.host_country}`);
+  res.json({ ok: true });
+}));
+// رفض شركة دولية — صاحب الدولة المضيفة أو المطورون
+app.post('/api/companies/:id/reject', ah(auth), ah(async (req, res) => {
+  const row = await one('SELECT * FROM companies WHERE id=$1', [req.params.id]);
+  if (!row) return res.status(404).json({ error: 'الشركة غير موجودة' });
+  if (row.status !== 'pending') return res.status(400).json({ error: 'الطلب ليس معلقًا' });
+  const dev = isDeveloper(req.user);
+  if (!dev && req.user.country_code !== row.host_country)
+    return res.status(403).json({ error: 'الرفض لصاحب الدولة المضيفة فقط' });
+  await q(`UPDATE companies SET status='rejected', updated_at=$2 WHERE id=$1`, [req.params.id, Date.now()]);
+  await notify(row.owner_id, 'company_decision',
+    `رُفض طلب شركتك «${row.name}»`,
+    `${cname(row.host_country)} رفضت تأسيس شركتك الدولية في ${row.city}.`,
+    `#/economy/${row.country_code}`);
+  res.json({ ok: true });
+}));
+// تعديل شركة — مالكها أو المطورون (لا يغيّر الدولة/النوع بعد الإنشاء)
 app.put('/api/companies/:id', ah(auth), ah(async (req, res) => {
   const row = await one('SELECT * FROM companies WHERE id=$1', [req.params.id]);
   if (!row) return res.status(404).json({ error: 'الشركة غير موجودة' });
-  const dev = req.user.role === 'developer';
+  const dev = isDeveloper(req.user);
   if (!dev && row.owner_id !== req.user.id) return res.status(403).json({ error: 'غير مصرح' });
-  let c; try { c = cleanCompany(req.body || {}, false); } catch (e) { return res.status(400).json({ error: e.message }); }
-  await q(`UPDATE companies SET name=$1,sector=$2,city=$3,capital=$4,description=$5,updated_at=$6 WHERE id=$7`,
-    [c.name, c.sector, c.city, c.capital, c.description, Date.now(), req.params.id]);
+  const b = req.body || {};
+  if (typeof b.name !== 'string' || !b.name.trim()) return res.status(400).json({ error: 'اسم الشركة مطلوب' });
+  if (!SECTORS.includes(b.sector)) return res.status(400).json({ error: 'اختر قطاعًا صالحًا' });
+  const city = typeof b.city === 'string' ? b.city.trim().slice(0, 120) : '';
+  const list = citiesOf(row.host_country);
+  if (list.length && !list.includes(city)) return res.status(400).json({ error: 'المدينة يجب أن تكون من مدن ' + cname(row.host_country) });
+  const desc = typeof b.description === 'string' && b.description.trim() ? b.description.trim().slice(0, 500) : null;
+  await q(`UPDATE companies SET name=$1,sector=$2,city=$3,description=$4,updated_at=$5 WHERE id=$6`,
+    [b.name.trim().slice(0, 120), b.sector, city, desc, Date.now(), req.params.id]);
   res.json({ ok: true });
 }));
 // حذف شركة — مالكها أو المطورون
 app.delete('/api/companies/:id', ah(auth), ah(async (req, res) => {
   const row = await one('SELECT * FROM companies WHERE id=$1', [req.params.id]);
   if (!row) return res.status(404).json({ error: 'الشركة غير موجودة' });
-  const dev = req.user.role === 'developer';
+  const dev = isDeveloper(req.user);
   if (!dev && row.owner_id !== req.user.id) return res.status(403).json({ error: 'غير مصرح' });
   await q('DELETE FROM companies WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
 }));
-// تعديل بيانات اقتصاد دولة — المطورون فقط
+// تعديل بيانات اقتصاد دولة — المطورون فقط (يحدّث الحقول المرسلة فقط)
 app.put('/api/economy/:code', ah(auth), requireDeveloper, ah(async (req, res) => {
   const cc = String(req.params.code || '').toUpperCase();
   if (!validCountry(cc)) return res.status(400).json({ error: 'كود دولة غير صالح' });
   const b = req.body || {};
   const str = (k, n) => typeof b[k] === 'string' && b[k].trim() ? b[k].trim().slice(0, n) : null;
   const num = (k) => b[k] == null || b[k] === '' ? null : Number(b[k]);
-  const conf = (k) => ['documented', 'estimate', 'unknown'].includes(b[k]) ? b[k] : 'unknown';
-  await q(`INSERT INTO country_economy (country_code,currency_name,currency_code,units_per_usd,
-            currency_confidence,currency_source,currency_note,population,pop_confidence,pop_source,
-            gdp_m_intl,gdp_confidence,gdp_source,gdp_note,updated_by,updated_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-           ON CONFLICT (country_code) DO UPDATE SET currency_name=EXCLUDED.currency_name,
-             currency_code=EXCLUDED.currency_code, units_per_usd=EXCLUDED.units_per_usd,
-             currency_confidence=EXCLUDED.currency_confidence, currency_source=EXCLUDED.currency_source,
-             currency_note=EXCLUDED.currency_note, population=EXCLUDED.population,
-             pop_confidence=EXCLUDED.pop_confidence, pop_source=EXCLUDED.pop_source,
-             gdp_m_intl=EXCLUDED.gdp_m_intl, gdp_confidence=EXCLUDED.gdp_confidence,
-             gdp_source=EXCLUDED.gdp_source, gdp_note=EXCLUDED.gdp_note,
-             updated_by=EXCLUDED.updated_by, updated_at=EXCLUDED.updated_at`,
-    [cc, str('currency_name', 80), str('currency_code', 12), num('units_per_usd'),
-     conf('currency_confidence'), str('currency_source', 500), str('currency_note', 300),
-     b.population == null || b.population === '' ? null : Math.max(0, parseInt(b.population, 10) || 0),
-     conf('pop_confidence'), str('pop_source', 500),
-     num('gdp_m_intl'), conf('gdp_confidence'), str('gdp_source', 500), str('gdp_note', 300),
-     req.user.id, Date.now()]);
+  const conf = (k) => ['documented', 'estimate', 'unknown'].includes(b[k]) ? b[k] : null;
+  const sets = [], vals = []; let i = 1;
+  const put = (col, v) => { sets.push(`${col}=$${i++}`); vals.push(v); };
+  if ('currency_name' in b) put('currency_name', str('currency_name', 80));
+  if ('currency_code' in b) put('currency_code', str('currency_code', 12));
+  if ('units_per_usd' in b) put('units_per_usd', num('units_per_usd'));
+  if ('currency_confidence' in b) put('currency_confidence', conf('currency_confidence') || 'unknown');
+  if ('currency_source' in b) put('currency_source', str('currency_source', 500));
+  if ('currency_note' in b) put('currency_note', str('currency_note', 300));
+  if ('population' in b) put('population', b.population == null || b.population === '' ? null : Math.max(0, parseInt(b.population, 10) || 0));
+  if ('pop_confidence' in b) put('pop_confidence', conf('pop_confidence') || 'unknown');
+  if ('pop_source' in b) put('pop_source', str('pop_source', 500));
+  if ('gdp_m_intl' in b) put('gdp_m_intl', num('gdp_m_intl'));
+  if ('gdp_confidence' in b) put('gdp_confidence', conf('gdp_confidence') || 'unknown');
+  if ('gdp_source' in b) put('gdp_source', str('gdp_source', 500));
+  if ('gdp_note' in b) put('gdp_note', str('gdp_note', 300));
+  if ('liquidity_m_usd' in b) put('liquidity_m_usd', num('liquidity_m_usd'));
+  if ('liquidity_confidence' in b) put('liquidity_confidence', conf('liquidity_confidence') || 'unknown');
+  if ('liquidity_source' in b) put('liquidity_source', str('liquidity_source', 500));
+  if ('liquidity_note' in b) put('liquidity_note', str('liquidity_note', 300));
+  const ex = await one('SELECT country_code FROM country_economy WHERE country_code=$1', [cc]);
+  if (!ex) {
+    await q(`INSERT INTO country_economy (country_code,updated_by,updated_at) VALUES ($1,$2,$3)`, [cc, req.user.id, Date.now()]);
+  }
+  if (sets.length) {
+    put('updated_by', req.user.id); put('updated_at', Date.now());
+    vals.push(cc);
+    await q(`UPDATE country_economy SET ${sets.join(', ')} WHERE country_code=$${i}`, vals);
+  }
   res.json({ ok: true });
+}));
+
+// ---------- الإشعارات ----------
+app.get('/api/notifications', ah(auth), ah(async (req, res) => {
+  const rows = await all(`SELECT * FROM notifications WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50`, [req.user.id]);
+  res.json({ notifications: rows.map((n) => ({
+    id: n.id, ntype: n.ntype, title: n.title, body: n.body, link: n.link,
+    is_read: !!n.is_read, created_at: Number(n.created_at),
+  })) });
+}));
+app.get('/api/notifications/unread-count', ah(auth), ah(async (req, res) => {
+  const r = await one(`SELECT COUNT(*) c FROM notifications WHERE user_id=$1 AND is_read IS NOT TRUE`, [req.user.id]);
+  res.json({ count: Number(r.c) || 0 });
+}));
+app.post('/api/notifications/read-all', ah(auth), ah(async (req, res) => {
+  await q(`UPDATE notifications SET is_read=TRUE WHERE user_id=$1`, [req.user.id]);
+  res.json({ ok: true });
+}));
+
+// ---------- سوق السلاح ----------
+async function processDeliveries() {
+  const due = await all(`SELECT * FROM market_orders WHERE status='in_transit' AND deliver_at <= $1`, [Date.now()]);
+  for (const o of due) {
+    const w = await one('SELECT * FROM weapons WHERE id=$1', [o.weapon_id]);
+    if (w) {
+      await q(`INSERT INTO weapons (country_code,name,class,wtype,model,quantity,image_url,
+               created_by,created_at,source_url,confidence,note)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [o.buyer_country, w.name, w.class, w.wtype, w.model, o.qty, w.image_url,
+         o.buyer_id, Date.now(), w.source_url, w.confidence,
+         `شراء من ${cname(o.seller_country)} عبر سوق السلاح`]);
+    }
+    await q(`UPDATE market_orders SET status='delivered' WHERE id=$1`, [o.id]);
+    await notify(o.buyer_id, 'market_delivery', 'وصلت شحنة السلاح',
+      `اكتمل تسليم ${o.qty} × ${w ? w.name : 'سلاح'} إلى ترسانة ${cname(o.buyer_country)}.`, `#/market`);
+  }
+}
+// السوق: العروض النشطة
+app.get('/api/market', ah(auth), ah(async (req, res) => {
+  await processDeliveries();
+  const rows = await all(`SELECT l.*, w.name AS weapon_name, w.class AS weapon_class, w.wtype AS weapon_wtype,
+                          w.model AS weapon_model, w.image_url AS weapon_image, w.quantity AS weapon_qty,
+                          u.username AS seller_name
+                          FROM market_listings l
+                          LEFT JOIN weapons w ON w.id=l.weapon_id
+                          LEFT JOIN users u ON u.id=l.seller_id
+                          WHERE l.status='active' ORDER BY l.created_at DESC`);
+  res.json({ listings: rows.map((l) => ({
+    id: l.id, seller_name: l.seller_name, seller_country: l.seller_country,
+    seller_continent: continentOf(l.seller_country),
+    weapon_id: l.weapon_id, weapon_name: l.weapon_name, weapon_class: l.weapon_class,
+    weapon_wtype: l.weapon_wtype, weapon_model: l.weapon_model, weapon_image: l.weapon_image,
+    qty: l.qty, price_unit_m_usd: Number(l.price_unit_m_usd),
+    created_at: Number(l.created_at),
+  })) });
+}));
+// عرض سلاح للبيع — كل لاعب يبيع أسلحة دولته بالسعر الذي يريده
+app.post('/api/market/listings', ah(auth), ah(async (req, res) => {
+  const b = req.body || {};
+  const dev = isDeveloper(req.user);
+  const w = await one('SELECT * FROM weapons WHERE id=$1', [b.weapon_id]);
+  if (!w) return res.status(404).json({ error: 'السلاح غير موجود' });
+  if (!dev && w.country_code !== req.user.country_code)
+    return res.status(403).json({ error: 'يمكنك بيع أسلحة دولتك فقط' });
+  const qty = Math.max(1, parseInt(b.qty, 10) || 0);
+  const price = Number(b.price_unit_m_usd);
+  if (!(price > 0)) return res.status(400).json({ error: 'حدد سعر البيع (بملايين الدولارات للقطعة)' });
+  const cap = w.quantity == null ? 50 : Math.max(0, Number(w.quantity));
+  const used = await one(`SELECT COALESCE(SUM(qty),0) s FROM market_listings
+                          WHERE weapon_id=$1 AND status='active'`, [w.id]);
+  const inT = await one(`SELECT COALESCE(SUM(o.qty),0) s FROM market_orders o
+                         JOIN market_listings l ON l.id=o.listing_id
+                         WHERE l.weapon_id=$1 AND o.status='in_transit'`, [w.id]);
+  const avail = cap - (Number(used.s) || 0) - (Number(inT.s) || 0);
+  if (qty > avail) return res.status(400).json({ error: `الكمية المتاحة للبيع: ${avail}` });
+  const sellerCC = dev && b.country_code && validCountry(String(b.country_code).toUpperCase())
+    ? String(b.country_code).toUpperCase() : (w.country_code || req.user.country_code);
+  const r = await q(`INSERT INTO market_listings (seller_id,seller_country,weapon_id,qty,price_unit_m_usd,created_at)
+                     VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+    [req.user.id, sellerCC, w.id, qty, price, Date.now()]);
+  res.json({ ok: true, id: r.rows[0].id });
+}));
+// إلغاء عرض — البائع أو المطورون
+app.delete('/api/market/listings/:id', ah(auth), ah(async (req, res) => {
+  const l = await one('SELECT * FROM market_listings WHERE id=$1', [req.params.id]);
+  if (!l) return res.status(404).json({ error: 'العرض غير موجود' });
+  if (l.status !== 'active') return res.status(400).json({ error: 'العرض غير نشط' });
+  if (!isDeveloper(req.user) && l.seller_id !== req.user.id)
+    return res.status(403).json({ error: 'غير مصرح' });
+  await q(`UPDATE market_listings SET status='cancelled' WHERE id=$1`, [req.params.id]);
+  res.json({ ok: true });
+}));
+// شراء سلاح — يُخصم من سيولة دولتك ويُضاف للبائع، والتسليم بزمن اللعبة
+app.post('/api/market/buy/:id', ah(auth), ah(async (req, res) => {
+  await processDeliveries();
+  const l = await one('SELECT * FROM market_listings WHERE id=$1', [req.params.id]);
+  if (!l || l.status !== 'active') return res.status(404).json({ error: 'العرض غير متاح' });
+  if (l.seller_id === req.user.id) return res.status(400).json({ error: 'لا يمكنك شراء عرضك الخاص' });
+  if (!req.user.country_code) return res.status(400).json({ error: 'تحتاج دولة لاستلام الشحنة' });
+  const qty = Math.max(1, parseInt((req.body || {}).qty, 10) || 0);
+  if (qty > l.qty) return res.status(400).json({ error: `الكمية المتاحة في العرض: ${l.qty}` });
+  const total = qty * Number(l.price_unit_m_usd);
+  const ok = await deductLiquidity(req.user.country_code, total);
+  if (!ok) return res.status(400).json({ error: 'سيولة دولتك لا تكفي لإتمام الشراء' });
+  await addLiquidity(l.seller_country, total);
+  const days = deliveryGameDays(req.user.country_code, l.seller_country);
+  const w = await one('SELECT name FROM weapons WHERE id=$1', [l.weapon_id]);
+  const r = await q(`INSERT INTO market_orders (listing_id,weapon_id,seller_id,seller_country,
+                     buyer_id,buyer_country,qty,total_m_usd,game_days,status,deliver_at,created_at)
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'in_transit',$10,$11) RETURNING id`,
+    [l.id, l.weapon_id, l.seller_id, l.seller_country, req.user.id, req.user.country_code,
+     qty, total, days, Date.now() + days * GAME_DAY_MS, Date.now()]);
+  const left = l.qty - qty;
+  if (left <= 0) await q(`UPDATE market_listings SET qty=0, status='sold' WHERE id=$1`, [l.id]);
+  else await q(`UPDATE market_listings SET qty=$2 WHERE id=$1`, [l.id, left]);
+  await notify(l.seller_id, 'market_sale', 'بيع سلاح جديد',
+    `${req.user.username} (${cname(req.user.country_code)}) اشترى ${qty} × ${w ? w.name : 'سلاح'} مقابل ${total} مليون دولار. المبلغ أُضيف لسيولة ${cname(l.seller_country)}.`,
+    `#/market`);
+  res.json({ ok: true, order_id: r.rows[0].id, game_days: days });
+}));
+// طلباتي (مشترياتي ومبيعاتي)
+app.get('/api/market/orders', ah(auth), ah(async (req, res) => {
+  await processDeliveries();
+  const rows = await all(`SELECT o.*, w.name AS weapon_name, w.image_url AS weapon_image,
+                          u1.username AS seller_name, u2.username AS buyer_name
+                          FROM market_orders o
+                          LEFT JOIN weapons w ON w.id=o.weapon_id
+                          LEFT JOIN users u1 ON u1.id=o.seller_id
+                          LEFT JOIN users u2 ON u2.id=o.buyer_id
+                          WHERE o.buyer_id=$1 OR o.seller_id=$1 ORDER BY o.created_at DESC`, [req.user.id]);
+  res.json({ orders: rows.map((o) => ({
+    id: o.id, weapon_name: o.weapon_name, weapon_image: o.weapon_image,
+    seller_name: o.seller_name, seller_country: o.seller_country,
+    buyer_name: o.buyer_name, buyer_country: o.buyer_country,
+    qty: o.qty, total_m_usd: Number(o.total_m_usd), game_days: o.game_days,
+    status: o.status, deliver_at: Number(o.deliver_at), created_at: Number(o.created_at),
+    mine_bought: o.buyer_id === req.user.id,
+  })) });
 }));
 
 // ---------- رفع صورة ----------
