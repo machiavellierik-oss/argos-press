@@ -2129,14 +2129,14 @@ async function wipeCompanies() {
   if (!confirm('تحذير: سيتم حذف جميع الشركات نهائيًا. متأكد؟')) return;
   if (!confirm('تأكيد أخير — لا رجعة فيه!')) return;
   try {
-    const r = await api('POST', '/api/admin/wipe-companies');
+    const r = await api('POST', '/admin/wipe-companies');
     msg('تم تصفير الشركات ✓ — حُذفت ' + r.deleted + ' شركة', true);
   } catch (e) { msg(e.message, false); }
 }
 async function anchorClock() {
   if (!confirm('ضبط بداية المحاكاة: 1 يناير 1900 منذ الساعة 6 مساء بتوقيت غرينتش اليوم (الأحد 27 سبتمبر)؟')) return;
   try {
-    await api('POST', '/api/clock/reset', { start_at: '2026-09-27T18:00:00.000Z' });
+    await api('POST', '/clock/reset', { start_at: '2026-09-27T18:00:00.000Z' });
     msg('تم ✓ — تبدأ المحاكاة من 6 مساء GMT اليوم وتنتقل تلقائيًا', true);
   } catch (e) { msg(e.message, false); }
 }
@@ -2144,7 +2144,7 @@ async function setGameDate() {
   const y = +document.getElementById('ckY').value, m = +document.getElementById('ckM').value, d = +document.getElementById('ckD').value;
   if (!confirm(`ضبط زمن اللعبة على ${d}/${m}/${y} وتشغيل الساعة؟`)) return;
   try {
-    const r = await api('POST', '/api/clock/set-date', { year: y, month: m, day: d });
+    const r = await api('POST', '/clock/set-date', { year: y, month: m, day: d });
     msg(`تم ✓ — زمن اللعبة الآن: ${r.game.day}/${r.game.month}/${r.game.year}`, true);
   } catch (e) { msg(e.message, false); }
 }
@@ -2789,7 +2789,7 @@ async function advSaveSettings() {
   document.querySelectorAll('#adv-domains input[type=checkbox]').forEach((c) => { domains[c.value] = c.checked; });
   if (msg) msg.textContent = 'جارٍ الحفظ...';
   try {
-    const r = await api('POST', '/api/advisor/settings', { mode: ADV.modeSel, domains });
+    const r = await api('POST', '/advisor/settings', { mode: ADV.modeSel, domains });
     ADV.state.advisor.mode = r.settings.mode;
     ADV.state.advisor.domains = r.settings.domains;
     ADV.state.advisor.autonomy = r.settings.mode === 1 ? 'مستشار' : r.settings.mode === 2 ? 'مساعد تنفيذي' : 'مدير مفوض';
@@ -2803,7 +2803,7 @@ async function advBrief(kind) {
   if (!out) return;
   out.innerHTML = '<div class="spin"></div>';
   try {
-    const r = await api('GET', '/api/advisor/brief/' + kind);
+    const r = await api('GET', '/advisor/brief/' + kind);
     out.innerHTML = _advBriefCard(r.brief);
   } catch (e) { out.innerHTML = `<div class="empty">${esc(e.message || 'تعذر التحميل')}</div>`; }
 }
@@ -2819,7 +2819,7 @@ function advTaskHTML(t) {
 }
 async function advLoadTasks() {
   try {
-    const r = await api('GET', '/api/advisor/tasks');
+    const r = await api('GET', '/advisor/tasks');
     ADV.tasks = r.tasks || [];
     const box = document.getElementById('adv-tasks');
     if (box) box.innerHTML = ADV.tasks.length ? ADV.tasks.map(advTaskHTML).join('') : '<div class="empty">لا قرارات معلقة — المستشار بانتظار توجيهاتك.</div>';
@@ -2832,7 +2832,7 @@ async function advDecide(id, okv) {
     await api('POST', `/api/advisor/tasks/${id}/${okv ? 'approve' : 'reject'}`);
     advLoadTasks();
     try {
-      const st = await api('GET', '/api/advisor/state');
+      const st = await api('GET', '/advisor/state');
       ADV.state = st;
       const p = document.getElementById('adv-pend');
       if (p) p.textContent = st.pending_approvals;
@@ -2855,7 +2855,7 @@ async function advSend(preset) {
   box.appendChild(tp);
   box.scrollTop = box.scrollHeight;
   try {
-    const r = await api('POST', '/api/advisor/chat', { text });
+    const r = await api('POST', '/advisor/chat', { text });
     tp.remove();
     box.insertAdjacentHTML('beforeend', advMsgHTML({ role: 'advisor', text: r.reply }));
     if (r.brief) {
@@ -2877,9 +2877,9 @@ async function vAdvisor() {
   let st;
   try {
     const [s, tk, hs] = await Promise.all([
-      api('GET', '/api/advisor/state'),
-      api('GET', '/api/advisor/tasks'),
-      api('GET', '/api/advisor/history'),
+      api('GET', '/advisor/state'),
+      api('GET', '/advisor/tasks'),
+      api('GET', '/advisor/history'),
     ]);
     st = s; ADV.state = s; ADV.tasks = tk.tasks || []; ADV.hist = hs.messages || []; ADV.modeSel = s.advisor.mode || 1;
   } catch (e) {
@@ -2969,7 +2969,7 @@ async function advMeet() {
   if (!out) return;
   out.innerHTML = '<div class="spin"></div>';
   try {
-    const r = await api('GET', '/api/advisor/brief/cabinet');
+    const r = await api('GET', '/advisor/brief/cabinet');
     out.innerHTML = _advBriefCard(r.brief);
   } catch (e) { out.innerHTML = `<div class="empty">${esc(e.message || 'تعذر عقد الاجتماع')}</div>`; }
 }
