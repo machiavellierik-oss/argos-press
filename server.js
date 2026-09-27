@@ -714,6 +714,22 @@ async function seedArmies() {
     }
     await q("INSERT INTO seed_meta (key,value) VALUES ('weapons_v2','done')");
   }
+
+  // الموجة الثانية: البحرية والطيران (516 سلاحًا) — إضافة فقط، دون مساس بالموجود
+  const meta3 = await one("SELECT value FROM seed_meta WHERE key='weapons_v3'");
+  if (!meta3) {
+    let NAVAL = [];
+    try { NAVAL = require('./server/data/weapons-naval-air.json'); } catch (e) { /* بلا بيانات */ }
+    for (const w of NAVAL) {
+      await q(`INSERT INTO weapons (country_code,name,class,wtype,model,quantity,image_url,
+               source_url,confidence,note,created_at)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [w.country_code, w.name_ar, w.class, w.wtype || null, w.model || null,
+         w.quantity, w.image_url, w.source || null, w.confidence || 'unknown',
+         w.note || null, Date.now()]);
+    }
+    await q("INSERT INTO seed_meta (key,value) VALUES ('weapons_v3','done')");
+  }
 }
 
 // قائمة الجيوش — كل لاعب يرى جيش دولته فقط، والمطورون يرون الكل
