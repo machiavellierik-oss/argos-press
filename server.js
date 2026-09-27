@@ -189,6 +189,15 @@ async function initDb() {
     country_code TEXT PRIMARY KEY, color TEXT, status TEXT,
     label TEXT, borders_geojson TEXT, updated_by INTEGER, updated_at BIGINT
   )`);
+  // إعلان حالة الحرب بين الولايات المتحدة وإسبانيا — يُزرع مرة واحدة فقط،
+  // ويمكن للمطورين تعديله/حذفه لاحقًا من محرر الخريطة
+  for (const cc of ['US', 'ES']) {
+    const ex = await one('SELECT country_code FROM map_states WHERE country_code=$1', [cc]);
+    if (!ex) await q(
+      `INSERT INTO map_states (country_code,color,status,label,updated_by,updated_at)
+       VALUES ($1,'#f4212e','war','الحرب الأمريكية – الإسبانية',NULL,$2)`,
+      [cc, Date.now()]);
+  }
   const n = await one('SELECT COUNT(*) AS c FROM articles');
   if (Number(n.c) === 0) {
     await q(
@@ -466,6 +475,17 @@ app.post('/api/account-token', ah(auth), ah(async (req, res) => {
   await q('INSERT INTO sessions (token,user_id,expires_at) VALUES ($1,$2,$3)',
     [token, req.user.id, Date.now() + 30 * 24 * 3600 * 1000]);
   res.json({ token, username: req.user.username });
+}));
+// دخول اللاعب الأمريكي إلى حساب المطورين بضغطة واحدة (هو من يعيّن كلمة سره أصلًا)
+app.post('/api/admin/dev-token', ah(auth), ah(async (req, res) => {
+  if (!(req.user.role === 'admin' && req.user.country_code === 'US'))
+    return res.status(403).json({ error: 'هذه الخاصية للاعب الأمريكي فقط' });
+  const dev = await one("SELECT id,username FROM users WHERE email='dev@argos.internal'");
+  if (!dev) return res.status(404).json({ error: 'حساب المطورين غير موجود' });
+  const token = crypto.randomBytes(32).toString('hex');
+  await q('INSERT INTO sessions (token,user_id,expires_at) VALUES ($1,$2,$3)',
+    [token, dev.id, Date.now() + 30 * 24 * 3600 * 1000]);
+  res.json({ token, username: dev.username });
 }));
 
 // قائمة المستخدمين للإدارة

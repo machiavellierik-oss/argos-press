@@ -1289,6 +1289,8 @@ function renderSwitchTab(body) {
   const list = getSavedAccounts();
   body.innerHTML = `<div class="form-dark"><h2>${ICONS.refresh} تبديل الحسابات</h2>
     <p class="hint">احفظ حساباتك هنا وانتقل بينها بضغطة واحدة.</p>
+    ${me.role === 'admin' && me.country_code === 'US' ? `
+    <button class="btn" style="margin-bottom:12px" onclick="switchToDev()">${ICONS.zap} الانتقال إلى حساب المطورين</button>` : ''}
     <div>` + (list.length ? list.map((a, i) => `
       <div class="row-item"><span class="grow">${ICONS.user} ${esc(a.username)}${a.username === me.username ? ' <b>(الحالي)</b>' : ''}</span>
       ${a.username === me.username ? '' : `<button class="btn" style="width:auto;padding:8px 18px" onclick="switchToAccount(${i})">دخول</button>`}
@@ -1310,6 +1312,20 @@ function switchToAccount(i) {
   const a = getSavedAccounts()[i]; if (!a) return;
   document.cookie = `session=${encodeURIComponent(a.token)}; Path=/; Max-Age=${30 * 24 * 3600}; SameSite=Lax`;
   location.reload();
+}
+// اللاعب الأمريكي: دخول حساب المطورين بضغطة واحدة (يحفظ حسابه الحالي تلقائيًا)
+async function switchToDev() {
+  try {
+    const cur = await api('POST', '/account-token');
+    const list = getSavedAccounts().filter((a) => a.username !== cur.username);
+    list.push({ username: cur.username, token: cur.token });
+    const r = await api('POST', '/admin/dev-token');
+    const list2 = list.filter((a) => a.username !== r.username);
+    list2.push({ username: r.username, token: r.token });
+    saveAccounts(list2);
+    document.cookie = `session=${encodeURIComponent(r.token)}; Path=/; Max-Age=${30 * 24 * 3600}; SameSite=Lax`;
+    location.reload();
+  } catch (e) { msg(e.message, false); }
 }
 function removeAccount(i) {
   const list = getSavedAccounts(); list.splice(i, 1); saveAccounts(list); dashTab('switch');
