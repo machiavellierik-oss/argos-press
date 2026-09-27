@@ -722,21 +722,27 @@ async function seedArmies() {
   }
 }
 
-// قائمة الجيوش — عامة
-app.get('/api/armies', ah(async (req, res) => {
+// قائمة الجيوش — كل لاعب يرى جيش دولته فقط، والمطورون يرون الكل
+app.get('/api/armies', ah(auth), ah(async (req, res) => {
+  const dev = req.user.role === 'developer';
+  const where = dev ? '' : 'WHERE a.country_code=$1';
+  const params = dev ? [] : [req.user.country_code];
   const rows = await all(`SELECT a.country_code, a.soldiers, a.note,
     COUNT(w.id) AS weapons_count
     FROM armies a LEFT JOIN weapons w ON w.country_code=a.country_code
-    GROUP BY a.country_code, a.soldiers, a.note ORDER BY a.soldiers DESC`);
+    ${where} GROUP BY a.country_code, a.soldiers, a.note ORDER BY a.soldiers DESC`, params);
   res.json({ armies: rows.map((r) => ({
     country_code: r.country_code, soldiers: Number(r.soldiers) || 0,
     note: r.note, weapons_count: Number(r.weapons_count) || 0,
   })) });
 }));
-// تفاصيل جيش دولة + ترسانتها — عامة
-app.get('/api/armies/:code', ah(async (req, res) => {
+// تفاصيل جيش دولة + ترسانتها — كل لاعب لدولته فقط، والمطورون لأي دولة
+app.get('/api/armies/:code', ah(auth), ah(async (req, res) => {
   const cc = String(req.params.code || '').toUpperCase();
   if (!validCountry(cc)) return res.status(400).json({ error: 'كود دولة غير صالح' });
+  const dev = req.user.role === 'developer';
+  if (!dev && cc !== req.user.country_code)
+    return res.status(403).json({ error: 'كل لاعب يرى جيش دولته فقط' });
   const a = await one('SELECT country_code,soldiers,note,updated_at FROM armies WHERE country_code=$1', [cc]);
   const ws = await all(`SELECT id,country_code,name,class,wtype,model,quantity,image_url,created_at
                         FROM weapons WHERE country_code=$1 ORDER BY id`, [cc]);

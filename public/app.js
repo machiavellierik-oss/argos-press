@@ -490,7 +490,7 @@ async function vNews() {
       <div id="mapeditor"></div>
       <div class="war-sec"><div class="war-sec-t">شدة الصراع — نافذة 30 يومًا</div><div id="wtable"><div class="spin"></div></div></div>
       <div class="war-sec"><div class="war-sec-t">الموجز اليومي</div><div id="wbriefs"><div class="spin"></div></div></div>
-      <div class="war-sec"><div class="war-sec-t">جيوش الدول — تعداد 1900</div><p class="hint" style="margin:0 0 10px">التعدادات تقديرات تاريخية تقريبية — اضغط على أي دولة لعرض ترسانتها الكاملة.</p><div id="warmies"><div class="spin"></div></div></div>
+      <div class="war-sec"><div class="war-sec-t" id="army-sec-t">جيش دولتك — تعداد 1900</div><p class="hint" id="army-sec-hint" style="margin:0 0 10px"></p><div id="warmies"><div class="spin"></div></div></div>
       <div id="armymgr"></div>`;
   let rows = [], mstates = [];
   try { const d = await api('GET', '/conflict'); rows = d.rows || []; }
@@ -886,10 +886,22 @@ function renderDeclarations(mstates) {
 const fmtArmy = (n) => Number(n || 0).toLocaleString('en-US');
 async function renderArmiesSection() {
   const el = document.getElementById('warmies'); if (!el) return;
+  const t = document.getElementById('army-sec-t'), h = document.getElementById('army-sec-hint');
+  const dev = me && me.role === 'developer';
+  if (!me) {
+    if (t) t.textContent = 'جيش دولتك';
+    if (h) h.textContent = '';
+    el.innerHTML = '<div class="empty">سجّل الدخول بحساب دولتك لرؤية جيشها.</div>';
+    return;
+  }
   let list = [];
   try { const d = await api('GET', '/armies'); list = d.armies || []; }
   catch (e) { el.innerHTML = '<div class="empty">تعذر تحميل بيانات الجيوش.</div>'; return; }
   if (!list.length) { el.innerHTML = '<div class="empty">لا توجد بيانات بعد.</div>'; return; }
+  if (t) t.textContent = dev ? 'جيوش الدول — تعداد 1900' : 'جيش دولتك — تعداد 1900';
+  if (h) h.textContent = dev
+    ? 'التعدادات تقديرات تاريخية تقريبية — اضغط على أي دولة لعرض ترسانتها الكاملة.'
+    : 'التعداد تقدير تاريخي تقريبي — اضغط لعرض الترسانة الكاملة لجيش دولتك.';
   el.innerHTML = '<div class="army-grid">' + list.map((a) => {
     const c = countryOf(a.country_code);
     return `<a class="army-card" href="#/army/${a.country_code}">
@@ -899,9 +911,15 @@ async function renderArmiesSection() {
     </a>`;
   }).join('') + '</div>';
 }
-// صفحة جيش دولة: التعداد + الترسانة الكاملة
+// صفحة جيش دولة: التعداد + الترسانة الكاملة — كل لاعب لدولته فقط
 async function vArmy(code) {
   code = String(code || '').toUpperCase();
+  if (!me) { location.hash = '#/login'; return; }
+  const dev = me.role === 'developer';
+  if (!dev && code !== me.country_code) {
+    app.innerHTML = thead('غير مصرح') + '<div class="empty">كل لاعب يرى جيش دولته فقط.</div><a class="btn ghost" href="#/news" style="margin-top:12px">← عودة لغرفة الحرب</a>';
+    return;
+  }
   const c = countryOf(code);
   app.innerHTML = thead('جيش ' + c.name) + '<div id="armybody"><div class="spin"></div></div>';
   let d;
