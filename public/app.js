@@ -161,7 +161,8 @@ function renderNav(active) {
     `<a class="nav-link${h === active ? ' active' : ''}" href="${h}">${ICONS[ic]}<span>${t}</span></a>`).join('');
   const bn = document.getElementById('bottomnav');
   const newsLink = NAV.find((n) => n[0] === '#/news');
-  bn.innerHTML = [NAV[0], newsLink, NAV[1], NAV[2], dashLink].map(([h, , ic]) =>
+  const econLink = NAV.find((n) => n[0] === '#/economy');
+  bn.innerHTML = [NAV[0], newsLink, econLink, NAV[1], NAV[2], dashLink].map(([h, , ic]) =>
     `<a class="${h === active ? 'active' : ''}" href="${h}">${ICONS[ic]}</a>`).join('');
   if (me) {
     api('GET', '/conversations').then((list) => {
