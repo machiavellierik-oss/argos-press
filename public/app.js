@@ -172,7 +172,7 @@ function renderNav(active) {
   ).join('') + `<div class="nav-sec-t">الحساب</div>` + link(dashLink);
   const bn = document.getElementById('bottomnav');
   const L = (h) => NAV_SECTIONS.flatMap((s2) => s2.links).find((n) => n[0] === h);
-  bn.innerHTML = [L('#/'), L('#/news'), L('#/economy'), L('#/market'), L('#/dispatches'), L('#/messages'), dashLink]
+  bn.innerHTML = [L('#/'), L('#/news'), L('#/market'), L('#/messages'), dashLink]
     .map(([h, , ic]) => `<a class="${h === active ? 'active' : ''}" href="${h}">${ICONS[ic]}</a>`).join('');
   refreshNotifBadge();
   if (me) {
