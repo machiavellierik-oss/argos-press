@@ -613,6 +613,21 @@ app.post('/api/clock/reset', ah(auth), requireDeveloper, ah(async (req, res) => 
   await q('UPDATE country_economy SET last_tax_collect=NULL');
   res.json({ ok: true, running: true, started_at: startAt, game: gameDateOf(startAt, Date.now()) });
 }));
+// ضبط تاريخ اللعبة يدويًا — المطورون فقط (بنفس القواعد: كل 24 ساعة واقعية = سنة لعبة)
+app.post('/api/clock/set-date', ah(auth), requireDeveloper, ah(async (req, res) => {
+  const y = parseInt(req.body && req.body.year, 10);
+  const mo = parseInt(req.body && req.body.month, 10);
+  const d = parseInt(req.body && req.body.day, 10);
+  if (![y, mo, d].every(Number.isFinite) || y < 1900 || y > 2200 || mo < 1 || mo > 12 || d < 1 || d > 30)
+    return res.status(400).json({ error: 'تاريخ غير صالح (السنة 1900-2200، الشهر 1-12، اليوم 1-30)' });
+  const now = Date.now();
+  const totalMonths = (y - 1900) * 12 + (mo - 1);
+  const startedAt = now - Math.round(totalMonths * GAME_MONTH_MS + ((d - 1) / 30) * GAME_MONTH_MS);
+  await q('UPDATE game_clock SET started_at=$1, running=1, updated_by=$2 WHERE id=1', [startedAt, req.user.id]);
+  await q('UPDATE companies SET last_collect=NULL');
+  await q('UPDATE country_economy SET last_tax_collect=NULL');
+  res.json({ ok: true, running: true, started_at: startedAt, game: gameDateOf(startedAt, now) });
+}));
 // تصفير جميع الشركات — المطورون فقط (قرار إداري لا رجعة فيه)
 app.post('/api/admin/wipe-companies', ah(auth), requireDeveloper, ah(async (req, res) => {
   const r = await q('DELETE FROM companies');

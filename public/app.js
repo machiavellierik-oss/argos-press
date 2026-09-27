@@ -2048,6 +2048,14 @@ async function renderAdminTab(body) {
       <button class="btn danger" style="width:auto;padding:10px 20px" onclick="wipeCompanies()">${ICONS.trash} تصفير جميع الشركات</button>
       <button class="btn" style="width:auto;padding:10px 20px" onclick="anchorClock()">↺ الساعة: 1900-01-01 منذ 6 مساء GMT اليوم</button>
     </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center">
+      <span class="hint">تاريخ اللعبة:</span>
+      <input id="ckY" type="number" min="1900" max="2200" value="1900" style="width:76px" placeholder="السنة">
+      <input id="ckM" type="number" min="1" max="12" value="1" style="width:60px" placeholder="الشهر">
+      <input id="ckD" type="number" min="1" max="30" value="1" style="width:60px" placeholder="اليوم">
+      <button class="btn" style="width:auto;padding:10px 20px" onclick="setGameDate()">ضبط التاريخ وتشغيل الساعة</button>
+    </div>
+    <p class="hint">بنفس القواعد: كل 24 ساعة واقعية = سنة لعبة — تستمر الساعة بالتقدم تلقائيًا من التاريخ المضبوط.</p>
     <div class="sec-h" style="margin-top:18px">المستخدمون (${users.length})</div>
     <div>` + (users.map((u) => {
       const c = countryOf(u.country_code);
@@ -2090,6 +2098,14 @@ async function anchorClock() {
   try {
     await api('POST', '/api/clock/reset', { start_at: '2026-09-27T18:00:00.000Z' });
     msg('تم ✓ — تبدأ المحاكاة من 6 مساء GMT اليوم وتنتقل تلقائيًا', true);
+  } catch (e) { msg(e.message, false); }
+}
+async function setGameDate() {
+  const y = +document.getElementById('ckY').value, m = +document.getElementById('ckM').value, d = +document.getElementById('ckD').value;
+  if (!confirm(`ضبط زمن اللعبة على ${d}/${m}/${y} وتشغيل الساعة؟`)) return;
+  try {
+    const r = await api('POST', '/api/clock/set-date', { year: y, month: m, day: d });
+    msg(`تم ✓ — زمن اللعبة الآن: ${r.game.day}/${r.game.month}/${r.game.year}`, true);
   } catch (e) { msg(e.message, false); }
 }
 async function banUser(id, name) {
