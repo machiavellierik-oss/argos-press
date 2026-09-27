@@ -1,5 +1,6 @@
 /* أرجوس — ثيم X الداكن الاحترافي */
 :root{
+  /* --- الأساس --- */
   --bg:#000000;
   --panel:#000000;
   --hover:rgba(231,233,234,.07);
@@ -13,6 +14,34 @@
   --red:#f4212e;
   --green:#00ba7c;
   --r:16px;
+
+  /* --- طبقات السطح (بدل --card/--panel المتضاربين) --- */
+  --surface-1:#16181c;   /* بطاقات، فقاعات، حقول */
+  --surface-2:#1c1f23;   /* هوفر على السطح 1 */
+  --card:var(--surface-1);        /* تعريف الاسم المستخدم فعليًا في الكود — كان بلا قيمة */
+  --border:var(--line);           /* نفس الشيء لـ --border */
+
+  /* --- تدرج نصي (بدل --text/--muted فقط) --- */
+  --text-1:var(--text);   /* عناوين، نص أساسي */
+  --text-2:var(--muted);  /* نص ثانوي */
+  --text-3:#4b5054;       /* نص باهت جدًا (تلميحات) */
+  --ink:var(--text-1);    /* اسم مستخدم فعليًا في الكود — كان بلا قيمة */
+  --fg:var(--text-1);     /* نفس الشيء لـ --fg */
+
+  /* --- حالات ثابتة --- */
+  --danger:var(--red);
+  --success:var(--green);
+  --warning:#ff9f0a;
+
+  /* --- نصف قطر ومسافات --- */
+  --r-sm:8px; --r-md:12px; --r-lg:16px; --r-pill:999px;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px;
+
+  /* --- مقاسات أيقونات موحدة --- */
+  --ic-sm:18px; --ic-md:22px; --ic-lg:26px;
+
+  /* --- أرقام محاذاة ثابتة (جداول/إحصائيات) --- */
+  --font-numeric:'IBM Plex Sans Arabic',system-ui,sans-serif;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth}
@@ -67,8 +96,9 @@ button{font-family:inherit;cursor:pointer}
 .timeline{width:600px;max-width:600px;min-height:100vh;border-inline-start:1px solid var(--line);
   border-inline-end:1px solid var(--line);flex-shrink:1}
 .thead{position:sticky;top:0;z-index:40;background:rgba(0,0,0,.72);backdrop-filter:blur(14px);
-  border-bottom:1px solid var(--line)}
-.thead-title{padding:12px 18px;font-size:1.22rem;font-weight:800}
+  border-bottom:1px solid var(--line);display:flex;align-items:center;
+  padding-top:env(safe-area-inset-top,0px)}
+.thead-title{padding:12px 18px;font-size:1.22rem;font-weight:800;flex:1;min-width:0}
 .ttabs{display:flex}
 .ttab{flex:1;background:none;border:none;color:var(--muted);font-size:.95rem;font-weight:600;
   padding:14px 8px;position:relative;transition:.2s}
@@ -108,7 +138,7 @@ button{font-family:inherit;cursor:pointer}
 .vbadge{width:18px;height:18px;flex-shrink:0;color:var(--accent)}
 .vbadge.gold{color:var(--gold)}
 .tw-handle{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tw-del{margin-inline-start:auto;background:none;border:none;color:var(--muted);width:30px;height:30px;
+.tw-del{margin-inline-start:auto;background:none;border:none;color:var(--muted);width:36px;height:36px;
   border-radius:50%;display:flex;align-items:center;justify-content:center;transition:.2s}
 .tw-del:hover{background:rgba(244,33,46,.12);color:var(--red)}
 .tw-del svg{width:16px;height:16px}
@@ -152,8 +182,8 @@ button{font-family:inherit;cursor:pointer}
 .byline .b-sub{color:var(--muted);font-size:.85rem}
 .d-actions{display:flex;justify-content:space-around;border-bottom:1px solid var(--line);padding:6px 0}
 .backrow{display:flex;align-items:center;gap:18px;padding:8px 14px;position:sticky;top:0;z-index:40;
-  background:rgba(0,0,0,.72);backdrop-filter:blur(14px)}
-.backbtn{width:36px;height:36px;border-radius:50%;border:none;background:none;color:var(--text);
+  background:rgba(0,0,0,.72);backdrop-filter:blur(14px);padding-top:calc(8px + env(safe-area-inset-top,0px))}
+.backbtn{width:40px;height:40px;border-radius:50%;border:none;background:none;color:var(--text);
   display:flex;align-items:center;justify-content:center;transition:.2s}
 .backbtn:hover{background:var(--hover2)}
 .backbtn svg{width:20px;height:20px}
@@ -410,7 +440,8 @@ button{font-family:inherit;cursor:pointer}
 .th-head{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:5}
 .th-u{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink)}
 .th-un{display:flex;flex-direction:column;gap:1px}
-.thread{padding:16px;display:flex;flex-direction:column;gap:8px;min-height:46vh;max-height:calc(100vh - 320px);overflow-y:auto}
+.thread{padding:16px;display:flex;flex-direction:column;gap:8px;min-height:46vh;
+  max-height:calc(100dvh - 260px);overflow-y:auto}
 .msg{display:flex;flex-direction:column;max-width:78%;gap:2px}
 .msg.mine{align-self:flex-end;align-items:flex-end}
 .msg.theirs{align-self:flex-start;align-items:flex-start}
@@ -436,7 +467,7 @@ button{font-family:inherit;cursor:pointer}
 .war-legend{display:flex;gap:14px;font-size:12.5px;color:#cfd6dd}
 .war-legend .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-inline-end:5px;box-shadow:0 0 8px currentColor}
 .war-sec{margin:18px 16px}
-.war-sec-t{font-size:16px;font-weight:800;margin-bottom:10px;padding-inline-start:4px;border-inline-start:3px solid var(--red);padding-inline-start:10px}
+.war-sec-t{font-size:16px;font-weight:800;margin-bottom:10px;padding-inline-start:10px;border-inline-start:3px solid var(--red)}
 .war-table{display:flex;flex-direction:column;gap:8px}
 .war-row{display:grid;grid-template-columns:auto 1fr auto;grid-template-areas:"flag name sev" "flag nums trend";gap:2px 10px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px;border-inline-start:3px solid}
 .war-row.sev-RED{border-inline-start-color:#f4212e}
@@ -591,13 +622,11 @@ button{font-family:inherit;cursor:pointer}
 .co-badge{display:inline-block;font-size:.72rem;font-weight:700;padding:2px 10px;border-radius:999px;margin-inline-start:6px;vertical-align:middle}
 .co-badge.national{background:rgba(46,160,90,.18);color:#4ade80;border:1px solid rgba(46,160,90,.4)}
 .co-badge.international{background:rgba(90,140,250,.16);color:#7aa5ff;border:1px solid rgba(90,140,250,.4)}
-.co-badge.pend{background:rgba(250,190,60,.15);color:#fbbf24;border:1px solid rgba(250,190,60,.4)}
+.co-badge.pend{background:rgba(250,190,60,.15);color:#fbbf24;border:1px solid rgba(250,90,90,.4)}
 .co-badge.rej{background:rgba(250,90,90,.15);color:#f87171;border:1px solid rgba(250,90,90,.4)}
 .nbell{position:relative;display:inline-flex;align-items:center;justify-content:center;color:var(--muted);padding:8px;border-radius:12px;margin-inline-start:auto}
 .nbell svg{width:22px;height:22px}
 .nbell .unread{position:absolute;top:2px;inset-inline-end:2px;margin:0;min-width:18px;height:18px;font-size:.65rem}
-.thead{display:flex;align-items:center}
-.thead-title{flex:1}
 .notif-card{display:flex;gap:12px;align-items:flex-start;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px 14px;margin-bottom:10px;color:inherit;text-decoration:none}
 .notif-card.fresh{border-color:var(--accent)}
 .notif-ic{color:var(--accent);flex-shrink:0;margin-top:2px}
@@ -606,8 +635,6 @@ button{font-family:inherit;cursor:pointer}
 .notif-tx b{font-size:.95rem}
 .notif-tx span{font-size:.88rem;color:var(--text)}
 .wpn-img{width:100%;max-height:150px;object-fit:cover;border-radius:10px;margin-bottom:8px}
-.ttab{background:none;border:none;color:var(--muted);font:inherit;font-weight:700;padding:8px 14px;cursor:pointer;border-radius:10px}
-.ttab.active{color:var(--text);background:rgba(255,255,255,.07)}
 @media(max-width:760px){.bottomnav a svg{width:22px;height:22px}.bottomnav a{padding:8px 2px}}
 
 /* ===== درج التنقل (هامبرغر) بأقسام — للشاشات الصغيرة فقط ===== */
