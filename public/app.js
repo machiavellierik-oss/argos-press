@@ -2527,15 +2527,18 @@ async function vUser(username) {
 // ---------- الحروب ----------
 async function vWars() {
   app.innerHTML = thead('الحروب') + '<div id="warbody"><div class="spin"></div></div>';
-  let d;
-  try { d = await api('GET', '/wars'); }
-  catch (e) { document.getElementById('warbody').innerHTML = `<div class="empty">${esc(e.message || 'تعذر التحميل')}</div>`; return; }
+  let d, col = null;
+  try { d = await api('GET', '/wars'); } catch (e) { document.getElementById('warbody').innerHTML = `<div class="empty">${esc(e.message || 'تعذر التحميل')}</div>`; return; }
+  try { col = await api('GET', '/colonies'); } catch (x) { col = { colonies: [] }; }
   const wars = d.wars || [];
   const myCC = me && me.country_code;
+  const colonies = (col && col.colonies) || [];
   const mine = (w) => myCC && (w.attacker_code === myCC || w.defender_code === myCC);
+  const myDiff = (w) => w.attacker_code === myCC ? w.score_a - w.score_b : w.score_b - w.score_a;
   const card = (w) => {
     const a = countryOf(w.attacker_code), df = countryOf(w.defender_code);
     const active = w.status === 'active';
+    const canColonize = active && mine(w) && myDiff(w) >= 50;
     return `<div class="wpn-card"><div class="wpn-tx">
       <b>${a.flag} ${esc(w.attacker_name)} <span class="hint">ضد</span> ${df.flag} ${esc(w.defender_name)}</b>
       <span class="co-badge ${active ? 'rej' : ''}">${active ? 'نشطة' : 'منتهية'}</span>
@@ -2543,11 +2546,24 @@ async function vWars() {
       <span class="me-btns">
         <button class="btn ghost sm" onclick="warBattles(${w.id})">تفاصيل/معارك</button>
         ${active && mine(w) ? `<button class="btn sm" onclick="warBattle(${w.id})">شن معركة</button>
-        <button class="btn ghost sm" onclick="warPeace(${w.id})">سلام</button>` : ''}
+        <button class="btn ghost sm" onclick="warPeace(${w.id})">سلام</button>
+        ${canColonize ? `<button class="btn sm" onclick="warColonize(${w.id})">👑 استعمار</button>` : ''}` : ''}
       </span>
       <div id="wb-${w.id}"></div>
     </div></div>`;
   };
+  const myColonies = myCC ? colonies.filter((c) => c.overlord_code === myCC) : [];
+  const myOverlord = myCC ? colonies.find((c) => c.colony_code === myCC) : null;
+  const colSec = `<div class="war-sec"><div class="war-sec-t">👑 المستعمرات (${colonies.length})</div>
+    ${myOverlord ? `<div class="wpn-card"><div class="wpn-tx"><b>أنت مستعمَرة لـ ${myOverlord.overlord_code ? countryOf(myOverlord.overlord_code).flag : ''} ${esc(myOverlord.overlord_name)}</b>
+      <span class="hint">تدفع جزية شهرية ${myOverlord.tribute_pct}% من جبايتك — ولا تعلن الحرب إلا حرب استقلال ضده.</span></div></div>` : ''}
+    ${myColonies.length ? '<div class="wpn-grid">' + myColonies.map((c) => `<div class="wpn-card"><div class="wpn-tx">
+      <b>${countryOf(c.colony_code).flag} ${esc(c.colony_name)}</b>
+      <span class="hint">جزية شهرية ${c.tribute_pct}% من جبايتها</span>
+      <span class="me-btns"><button class="btn ghost sm" onclick="colonyRelease('${c.colony_code}')">تحرير 🕊️</button></span>
+    </div></div>`).join('') + '</div>' : (myOverlord ? '' : '<div class="empty">لا مستعمرات بعد — اسحق عدوك بفرق 50+ نقطة ثم استعمره.</div>')}
+    ${colonies.length && !myCC ? '<div class="wpn-grid">' + colonies.map((c) => `<div class="wpn-card"><div class="wpn-tx"><b>${countryOf(c.colony_code).flag} ${esc(c.colony_name)}</b><span class="hint">مستعمَرة لـ ${esc(c.overlord_name)}</span></div></div>`).join('') + '</div>' : ''}
+  </div>`;
   const declareBox = myCC ? `<div class="war-sec"><div class="war-sec-t">${ICONS.swords} إعلان حرب</div>
       <div class="map-ed"><div class="field"><label>الدولة المستهدفة</label>
         <select id="war-target">${COUNTRIES.filter((c) => c.code !== myCC).map((c) => `<option value="${c.code}">${c.flag} ${c.name}</option>`).join('')}</select>
@@ -2556,6 +2572,7 @@ async function vWars() {
       <div class="me-btns"><button class="btn sm" onclick="warDeclare()">إعلان الحرب</button></div>
     </div>` : '<p class="hint">إعلان الحروب وشن المعارك لأصحاب الدول فقط.</p>';
   document.getElementById('warbody').innerHTML = declareBox
+    + colSec
     + `<div class="war-sec"><div class="war-sec-t">${ICONS.swords} الحروب (${wars.length})</div>
       ${wars.length ? '<div class="wpn-grid">' + wars.map(card).join('') + '</div>' : '<div class="empty">لا حروب مسجلة — العالم يعيش سلامًا هشًا.</div>'}
     </div>`;
@@ -2661,6 +2678,19 @@ async function warPeace(id) {
     else alert('أُرسل عرض السلام للطرف الآخر — بانتظار قبوله');
     vWars();
   } catch (e) { alert(e.message); }
+}
+async function warColonize(id) {
+  if (!confirm('استعمار المهزوم؟ ستحصل على غنيمة فورية وجزية شهرية 25% من جبايته — وستفقد حقه في إعلان الحروب (إلا حرب استقلال ضدك).')) return;
+  try {
+    const r = await api('POST', '/war/colonize', { war_id: id });
+    alert(`👑 تم الاستعمار! غنيمة فورية ${fmtRate(r.loot)} مليون $ + جزية شهرية ${r.tribute_pct}% من ${r.colony_name || 'المستعمَرة'}`);
+    vWars();
+  } catch (e) { alert(e.message); }
+}
+async function colonyRelease(code) {
+  if (!confirm('تحرير هذه المستعمَرة ومنحها الاستقلال؟')) return;
+  try { await api('POST', '/colonies/' + code + '/release'); alert('تم التحرير 🕊️'); vWars(); }
+  catch (e) { alert(e.message); }
 }
 
 // ---------- الدبلوماسية ----------

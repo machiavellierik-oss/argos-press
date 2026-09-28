@@ -225,6 +225,7 @@ async function initDb() {
   await seedEconomy();
   await seedWar();
   await seedDiplomacy();
+  await seedColonies();
   await seedIntel();
   const n = await one('SELECT COUNT(*) AS c FROM articles');
   if (Number(n.c) === 0) {
@@ -1061,6 +1062,66 @@ async function seedDiplomacy() {
     PRIMARY KEY (country_code, treaty_type)
   )`);
 }
+// ---------- الاستعمار ----------
+// مستعمَرة تدفع جزية شهرية (25% من جبايتها) لمستعمِرها، ولا تعلن الحرب إلا حرب استقلال ضده.
+// أي سلام بين المستعمِر ومستعمَرته يحررها؛ والتحرير الطوعي متاح للمستعمِر.
+async function seedColonies() {
+  await q(`CREATE TABLE IF NOT EXISTS colonies (
+    colony_code TEXT PRIMARY KEY, overlord_code TEXT NOT NULL,
+    tribute_pct INTEGER NOT NULL DEFAULT 25,
+    started_game_time BIGINT NOT NULL, created_at BIGINT NOT NULL
+  )`);
+}
+async function getColony(cc) {
+  return one('SELECT * FROM colonies WHERE colony_code=$1', [cc]).catch(() => null);
+}
+async function getOverlordColonies(overlord) {
+  return all('SELECT * FROM colonies WHERE overlord_code=$1 ORDER BY colony_code', [overlord]).catch(() => []);
+}
+// تحرير تلقائي: أي نهاية حرب بين مستعمِر ومستعمَرته تعني استقلالها
+async function freeColonyIfPair(a, b) {
+  const r = await q(`DELETE FROM colonies
+    WHERE (colony_code=$1 AND overlord_code=$2) OR (colony_code=$2 AND overlord_code=$1)`, [a, b]);
+  return r.rowCount > 0;
+}
+// الاستعمار — المنتصر بفرق 50+ نقطة يستعمر المهزوم بدل التعويضات فقط
+async function colonizeInternal(warId, meCC, actorUsername, force) {
+  const w = await one('SELECT * FROM wars WHERE id=$1', [parseInt(warId, 10) || 0]);
+  if (!w || w.status !== 'active') throw { status: 404, message: 'لا توجد حرب نشطة بهذا الرقم' };
+  if (meCC !== w.attacker_code && meCC !== w.defender_code)
+    throw { status: 403, message: 'غير مصرح — لست طرفًا في هذه الحرب' };
+  const meSide = meCC === w.attacker_code ? w.attacker_code : w.defender_code;
+  const otherSide = meSide === w.attacker_code ? w.defender_code : w.attacker_code;
+  const myDiff = meSide === w.attacker_code ? Number(w.score_a) - Number(w.score_b) : Number(w.score_b) - Number(w.score_a);
+  if (!force && myDiff < 50) throw { status: 400, message: 'الاستعمار يتطلب تفوقًا ساحقًا (فرق 50+ نقطة لصالحك)' };
+  if (await getColony(meSide)) throw { status: 400, message: 'دولة مستعمَرة لا تستعمر غيرها' };
+  if (await getColony(otherSide)) throw { status: 400, message: 'لا يمكن استعمار دولة مستعمَرة أصلًا' };
+  // غنيمة فورية — نفس معادلة التعويضات
+  const g = await gameNow();
+  const want = Math.round(Math.abs(myDiff) * 5);
+  const le = await one('SELECT liquidity_m_usd FROM country_economy WHERE country_code=$1', [otherSide]);
+  const loot = Math.max(0, Math.min(Math.floor(Number(le && le.liquidity_m_usd) || 0), want));
+  if (loot > 0) {
+    await deductLiquidity(otherSide, loot);
+    await addLiquidity(meSide, loot);
+    await logLiq(otherSide, -loot, `غنائم استعمار لصالح ${cname(meSide)}`, actorUsername);
+    await logLiq(meSide, loot, `غنائم استعمار من ${cname(otherSide)}`, actorUsername);
+  }
+  await q('UPDATE wars SET status=$1, ended_game_time=$2, proposed_by=NULL WHERE id=$3', ['ended', g, w.id]);
+  await setMapWarStatus(w.attacker_code, false);
+  await setMapWarStatus(w.defender_code, false);
+  await freeColonyIfPair(meSide, otherSide); // كانت حرب استقلال؟ انتهت — ثم يبدأ عهد جديد
+  await q(`INSERT INTO colonies (colony_code,overlord_code,tribute_pct,started_game_time,created_at)
+           VALUES ($1,$2,25,$3,$4)`, [otherSide, meSide, g, Date.now()]);
+  await emitEvent('colonized', meSide, otherSide,
+    `👑 ${cname(meSide)} تستعمر ${cname(otherSide)} — جزية شهرية 25% من الجباية`, { war_id: w.id });
+  await audit('war_colonize', actorUsername, `${meSide} استعمرت ${otherSide} (فرق ${Math.round(myDiff)} نقطة، غنيمة ${loot} مليون $)`);
+  await notifyCountry(otherSide, 'colony', `تم استعمار دولتك!`,
+    `${cname(meSide)} استعمرت دولتك. ستدفع جزية شهرية 25% من جبايتك، ولا تعلن الحرب إلا حرب استقلال ضد مستعمِرك.`, '#/wars');
+  await notifyCountry(meSide, 'colony', `مستعمَرة جديدة: ${cname(otherSide)} 👑`,
+    `أصبحت ${cname(otherSide)} مستعمَرة لك — جزية شهرية 25% من جبايتها تصلك تلقائيًا.`, '#/wars');
+  return { colonized: true, colony: otherSide, overlord: meSide, loot, tribute_pct: 25 };
+}
 async function getTreatyPolicy(cc, type) {
   const r = await one('SELECT policy FROM treaty_autopolicy WHERE country_code=$1 AND treaty_type=$2', [cc, type])
     .catch(() => null);
@@ -1172,6 +1233,10 @@ async function declareWarInternal(attacker, target, actorUsername) {
   if (attacker === target) throw { status: 400, message: 'لا يمكن إعلان الحرب على نفسك' };
   const ex = await activeWarBetween(attacker, target);
   if (ex) throw { status: 400, message: 'حرب نشطة موجودة أصلًا بين الدولتين' };
+  // المستعمَرة لا تعلن الحرب إلا حرب استقلال ضد مستعمِرها
+  const atkCol = await getColony(attacker).catch(() => null);
+  if (atkCol && atkCol.overlord_code !== target)
+    throw { status: 403, message: 'دولة مستعمَرة لا تعلن الحرب إلا حرب استقلال ضد مستعمِرها' };
   for (const tt of ['non_aggression', 'alliance', 'defensive']) {
     const t = await activeTreaty(attacker, target, tt);
     if (t) await breakTreaty(t, attacker, 'إعلان الحرب', { user: { username: actorUsername } });
@@ -1299,6 +1364,7 @@ async function peaceInternal(warId, meCC, actorUsername, force) {
     await q(`UPDATE wars SET status='ended', ended_game_time=$1, proposed_by=NULL WHERE id=$2`, [g, w.id]);
     await setMapWarStatus(w.attacker_code, false);
     await setMapWarStatus(w.defender_code, false);
+    await freeColonyIfPair(w.attacker_code, w.defender_code); // سلام مع المستعمِر = استقلال
     await emitEvent('war_ended', w.attacker_code, w.defender_code,
       `انتهت الحرب بين ${cname(w.attacker_code)} و${cname(w.defender_code)}${reparations ? ` — تعويضات ${reparations} مليون دولار` : ''}`,
       { war_id: w.id, reparations: reparations || 0 });
@@ -1374,6 +1440,38 @@ app.post('/api/war/peace', ah(auth), ah(async (req, res) => {
   const b = req.body || {};
   const out = await peaceInternal(b.war_id, req.user.country_code, req.user.username, dev && b.force);
   res.json(Object.assign({ ok: true }, out));
+}));
+// الاستعمار — المنتصر بفرق 50+ نقطة يستعمر المهزوم (جزية شهرية 25%)
+// تحرير طوعي — المستعمِر (أو المطورون) يحرر مستعمَرة | قائمة المستعمرات
+app.post('/api/war/colonize', ah(auth), ah(async (req, res) => {
+  const dev = isDeveloper(req.user);
+  const b = req.body || {};
+  const out = await colonizeInternal(b.war_id, req.user.country_code, req.user.username, dev && b.force);
+  res.json(Object.assign({ ok: true }, out));
+}));
+app.post('/api/colonies/:code/release', ah(auth), ah(async (req, res) => {
+  const dev = isDeveloper(req.user);
+  const cc = String(req.params.code || '').toUpperCase();
+  const col = await getColony(cc);
+  if (!col) return res.status(404).json({ error: 'ليست مستعمَرة' });
+  if (!dev && req.user.country_code !== col.overlord_code) return res.status(403).json({ error: 'غير مصرح — التحرير للمستعمِر فقط' });
+  await q('DELETE FROM colonies WHERE colony_code=$1', [cc]);
+  const g = await gameNow();
+  await emitEvent('colony_freed', col.overlord_code, cc, `🕊️ ${cname(col.overlord_code)} تحرر ${cname(cc)}`, {});
+  await audit('colony_release', req.user.username, `${col.overlord_code} حررت ${cc}`);
+  await notifyCountry(cc, 'colony', 'استقللت! 🕊️', `${cname(col.overlord_code)} منحت دولتك الاستقلال.`, '#/wars');
+  res.json({ ok: true });
+}));
+app.get('/api/colonies', ah(auth), ah(async (req, res) => {
+  const rows = await all('SELECT * FROM colonies ORDER BY overlord_code, colony_code');
+  res.json({
+    colonies: rows.map((c) => ({
+      colony_code: c.colony_code, colony_name: cname(c.colony_code),
+      overlord_code: c.overlord_code, overlord_name: cname(c.overlord_code),
+      tribute_pct: Number(c.tribute_pct) || 25,
+      mine: req.user.country_code === c.colony_code || req.user.country_code === c.overlord_code,
+    })),
+  });
 }));
 // ---------- المعاهدات ----------
 // قائمة المعاهدات — العامة فقط (السرية لا تظهر إلا لأطرافها والمطورين)
@@ -2515,6 +2613,17 @@ async function collectTaxesInternal(cc, actor) {
   await q('UPDATE country_economy SET liquidity_m_usd = COALESCE(liquidity_m_usd,0) + $2 WHERE country_code=$1',
     [cc, amount]);
   await logLiq(cc, amount, `جباية الضرائب الشهرية بنسبة ${rate}%`, actor);
+  // الجزية الاستعمارية: 25% من الجباية تذهب للمستعمِر تلقائيًا
+  const col = await getColony(cc).catch(() => null);
+  if (col && col.overlord_code) {
+    const tribute = Math.round(amount * (Number(col.tribute_pct) || 25) / 100);
+    if (tribute > 0) {
+      await q('UPDATE country_economy SET liquidity_m_usd = COALESCE(liquidity_m_usd,0) - $2 WHERE country_code=$1', [cc, tribute]);
+      await q('UPDATE country_economy SET liquidity_m_usd = COALESCE(liquidity_m_usd,0) + $2 WHERE country_code=$1', [col.overlord_code, tribute]);
+      await logLiq(cc, -tribute, `جزية استعمارية لصالح ${cname(col.overlord_code)}`, actor);
+      await logLiq(col.overlord_code, tribute, `جزية استعمارية من ${cname(cc)}`, actor);
+    }
+  }
   const ne = await one('SELECT liquidity_m_usd FROM country_economy WHERE country_code=$1', [cc]);
   return { amount, liquidity: Number(ne.liquidity_m_usd) || 0 };
 }
@@ -4143,6 +4252,8 @@ async function llmGovernTurn(cc, monthIdx) {
     top_armies: armies.filter((a) => a.country_code !== cc).map((a) => ({
       code: a.country_code, soldiers: a.soldiers, human: claimed.has(a.country_code),
     })),
+    colony_of: (await getColony(cc).catch(() => null) || {}).overlord_code || null,
+    colonies: (await getOverlordColonies(cc).catch(() => [])).map((c) => c.colony_code),
   };
   const sys = 'أنت الحاكم الأعلى لدولة ' + state.country + ' في لعبة محاكاة جيوسياسية سنة 1900. '
     + 'شخصيتك الاستراتيجية: ' + strategy + ' (conservative حذر دفاعي، balanced متوازن، expansionist توسعي طموح). '
@@ -4154,9 +4265,12 @@ async function llmGovernTurn(cc, monthIdx) {
     + ' "treaties": [{"type": "non_aggression|trade|alliance|defensive", "to": "CODE"}],\n'
     + ' "spy": {"target": "CODE", "kind": "economy|stability"},\n'
     + ' "declare_war": "CODE أو null",\n'
+    + ' "colonize_war_id": 123,\n'
     + ' "message": {"to": "CODE", "text": "رسالة دبلوماسية"},\n'
     + ' "reason": "سطر واحد: تحليلك للوضع ثم منطق قراراتك"}\n'
     + 'قواعد صارمة: الضريبة المرتفعة تهز الاستقرار. لا تعلن حربًا إلا بتفوق عسكري واضح واستقرار فوق 55. '
+    + 'إن كانت لك حرب بفرق 50+ نقطة لصالحك يمكنك استعمار المهزوم (colonize_war_id برقم الحرب) بدل الاكتفاء بالتعويضات — '
+    + 'غنيمة فورية وجزية شهرية 25% من جبايته. إن كنت مستعمَرة (colony_of) لا تعلن الحرب إلا ضد مستعمِرك (حرب استقلال). '
     + 'الحروب المنطقية فقط: نفس قارتك، أو قوة عظمى (80 ألف+ جندي) داخل إقليمك، أو قوة بحرية عظمى (100 ألف+ جندي ببحرية حربية) عبر البحار — سويسرا محايدة دائمًا فلا تهاجمها أبدًا. '
     + 'لا تقترح معاهدة من نوع سارٍ أصلًا مع نفس الدولة. التجسس مكلف وقد يُكشف فيهبط سمعتك. '
     + 'اقبل/ارفض المعاهدات كبشر: انظر لسمعة المقترح (proposer_reputation)، وهل بينكم حرب (at_war)، وتاريخه معك في الذاكرة — '
@@ -4255,7 +4369,12 @@ async function llmGovernTurn(cc, monthIdx) {
       }
     }
   }
-  // 9) رسالة دبلوماسية استباقية — للاعبين البشر فقط، واحدة شهريًا كحد أقصى
+  // 9) الاستعمار — برقم الحرب، والمحرك يتحقق من فرق 50+ لصالحك
+  if (d.colonize_war_id != null && Number.isFinite(Number(d.colonize_war_id))) {
+    try { await colonizeInternal(Number(d.colonize_war_id), cc, A); notes.push('استعمار'); }
+    catch (err) { /* رفضها المحرك */ }
+  }
+  // 10) رسالة دبلوماسية استباقية — للاعبين البشر فقط، واحدة شهريًا كحد أقصى
   if (d.message && typeof d.message.to === 'string' && typeof d.message.text === 'string') {
     const toCC = d.message.to.toUpperCase();
     const txt = d.message.text.trim().slice(0, 500);
@@ -4482,7 +4601,13 @@ async function aiGovern(cc, strategy, actor = AI_ACTOR, domains = null) {
       const myDiff = w.attacker_code === cc ? Number(w.score_a) - Number(w.score_b) : Number(w.score_b) - Number(w.score_a);
       const monthsAtWar = (gNow - Number(w.started_game_time || gNow)) / GAME_MONTH_MS;
       if (myDiff >= 50 || myDiff <= -30 || monthsAtWar > 12) {
-        try { await peaceInternal(w.id, cc, actor); } catch (e) { /* عرض قائم أو حرب انتهت */ }
+        try {
+          // التوسعي يستعمر عند التفوق الساحق بدل الاكتفاء بالتعويضات
+          if (myDiff >= 50 && strategy === 'expansionist' && !(await getColony(cc).catch(() => null))) {
+            try { await colonizeInternal(w.id, cc, actor); continue; } catch (e) { /* سقط — سلام عادي */ }
+          }
+          await peaceInternal(w.id, cc, actor);
+        } catch (e) { /* عرض قائم أو حرب انتهت */ }
       }
     }
     myWars = await all(`SELECT * FROM wars WHERE status='active' AND (attacker_code=$1 OR defender_code=$1)`, [cc]);
