@@ -766,3 +766,5 @@ body.nav-open .nav-scrim{opacity:1;pointer-events:auto}
 
 .emb-head{padding:14px 18px 6px;font-weight:700;color:var(--gold,#c9a227);font-size:14px}
 .emb-av{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:28px;background:#1a2233;flex:none}
+/* إصلاح إتاحة أزرار رفع الصور: display:none تُسقط المدخل من شجرة الوصول — إخفاء بصري فقط */
+input[type="file"].a11y-hidden{position:absolute!important;width:1px;height:1px;margin:0;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;opacity:0}

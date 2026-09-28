@@ -349,7 +349,7 @@ function composerHTML() {
       <div class="c-prev" id="cprev" style="display:none"><img id="cprevimg"><button id="cpremx">✕</button></div>
       <div class="c-tools">
         <button class="c-ic" id="cimgbtn" title="إرفاق صورة">${ICONS.img}</button>
-        <input type="file" id="cimg" accept="image/*" style="display:none">
+        <input type="file" id="cimg" accept="image/*" class="a11y-hidden">
         <span class="c-count" id="ccount">0 / 500</span>
         <button class="c-post" id="cpost">نشر</button>
       </div>
@@ -1943,7 +1943,7 @@ async function dashTab(t) {
     const c = countryOf(me.country_code);
     body.innerHTML = `<div class="form-dark"><h2>برقية جديدة باسم ${c.flag} ${esc(c.name)}</h2><div id="msg"></div>
       <div class="field"><textarea id="dbody" maxlength="500" placeholder="بماذا تودّ أن تُصرّح؟ (500 حرف كحد أقصى)"></textarea></div>
-      <div class="field"><label class="filebtn">${ICONS.img} إرفاق صورة (اختياري)<input id="dimg" type="file" accept="image/*" style="display:none"></label></div>
+      <div class="field"><label class="filebtn">${ICONS.img} إرفاق صورة (اختياري)<input id="dimg" type="file" accept="image/*" class="a11y-hidden"></label></div>
       <button class="btn" style="width:auto;padding:12px 44px" onclick="sendDispatch()">نشر البرقية</button></div>`;
   } else if (t === 'new-a') {
     const staff = me.role === 'admin' || me.role === 'system';
@@ -1953,14 +1953,14 @@ async function dashTab(t) {
       <div class="field"><label>القسم</label><select id="acat">${cats.map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
       <div class="field"><label>العنوان</label><input id="atitle"></div>
       <div class="field"><label>نص المقال</label><textarea id="abody" style="min-height:220px" placeholder="اكتب سيناريو المعركة أو الحدث بالتفصيل…"></textarea></div>
-      <div class="field"><label class="filebtn">${ICONS.img} صورة المقال (اختياري)<input id="aimg" type="file" accept="image/*" style="display:none"></label></div>
+      <div class="field"><label class="filebtn">${ICONS.img} صورة المقال (اختياري)<input id="aimg" type="file" accept="image/*" class="a11y-hidden"></label></div>
       <button class="btn" style="width:auto;padding:12px 44px" onclick="sendArticle()">نشر المقال</button></div>`;
   } else if (t === 'edit') {
     body.innerHTML = `<div class="form-dark"><h2>تعديل البروفايل</h2><div id="msg"></div>
       <div class="field"><label>الصورة الشخصية</label>
         <div class="pav-row">
           <span id="pavprev">${avHTML(me, 64)}</span>
-          <label class="filebtn">${ICONS.img} اختر صورة<input id="pavatar" type="file" accept="image/*" style="display:none"></label>
+          <label class="filebtn">${ICONS.img} اختر صورة<input id="pavatar" type="file" accept="image/*" class="a11y-hidden"></label>
           <button class="btn ghost" id="pavrm" style="width:auto;padding:8px 16px">إزالة</button>
         </div>
         <input id="pavatarurl" type="hidden" value="${esc(me.avatar || '')}"></div>
@@ -2240,7 +2240,7 @@ async function vDashDossier(body) {
     <div class="field"><label>الصورة الشخصية للملف</label>
       <div style="display:flex;gap:12px;align-items:center">
         <img id="favatarprev" class="avprev" src="${esc(d.avatar || '')}" style="${d.avatar ? '' : 'display:none'}">
-        <label class="filebtn">${ICONS.img} اختر صورة<input id="favatar" type="file" accept="image/*" style="display:none"></label>
+        <label class="filebtn">${ICONS.img} اختر صورة<input id="favatar" type="file" accept="image/*" class="a11y-hidden"></label>
       </div><input id="favatarurl" type="hidden" value="${esc(d.avatar || '')}"></div>
     <div class="field"><label>الاسم المستعار (Alias)</label><input id="falias" value="${esc(d.alias)}" placeholder="مثال: الثعلب" dir="ltr"></div>
     <div class="frow">
@@ -2367,7 +2367,7 @@ function openStoryAdd() {
     <div class="c-prev" id="sprev" style="display:none"><img id="sprevimg"><button id="spremx">✕</button></div>
     <div class="c-tools">
       <button class="c-ic" id="simgbtn" title="إرفاق صورة">${ICONS.img}</button>
-      <input type="file" id="simg" accept="image/*" style="display:none">
+      <input type="file" id="simg" accept="image/*" class="a11y-hidden">
       <button class="c-post" id="spost" style="margin-inline-start:auto">نشر الستوري</button>
     </div>
     <p class="hint">الستوري يختفي تلقائيًا بعد 24 ساعة</p>
@@ -3280,7 +3280,7 @@ async function vThread(username) {
     <div class="c-prev" id="tprev" style="display:none"><img id="tprevimg"><button id="tpremx">✕</button></div>
     <div class="cform tform">
       <button class="c-ic" id="timgbtn" title="صورة">${ICONS.img}</button>
-      <input type="file" id="timg" accept="image/*" style="display:none">
+      <input type="file" id="timg" accept="image/*" class="a11y-hidden">
       <input id="tinput" maxlength="1000" placeholder="اكتب رسالة…" autocomplete="off">
       <button class="c-post" id="tsend">إرسال</button>
     </div>`;
