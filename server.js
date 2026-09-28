@@ -13,6 +13,7 @@ const { Pool } = require('pg');
 const { createClient } = require('@supabase/supabase-js');
 const { COUNTRIES } = require('./countries');
 const { LATLON } = require('./geo');
+const { weaponAvailability, logisticsModifier, readinessModifier } = require('./server/realism');
 
 const PORT = process.env.PORT || 3000;
 
@@ -1513,8 +1514,26 @@ async function battleInternal(warId, attackerCC, units, region, actorUsername, w
   let targetCity = String(o.target_city || '').trim().slice(0, 60);
   const defCities = (typeof GEO_CITIES !== 'undefined' && GEO_CITIES && GEO_CITIES[bDef]) || [];
   if (targetCity && !defCities.includes(targetCity)) targetCity = '';
-  // أسلحة المهاجم (يختارها اللاعب أو الذكاء) — تُضاف قوة نيرانها فوق قوة الجنود
-  const attW = await validateBattleWeapons(bAtt, weaponPick);
+  // طبقة الواقعية التاريخية: التقنية واللوجستيات والجاهزية مرتبطة بتاريخ اللعبة
+  const gs = await gameState();
+  const base = gs.started_at || Date.now();
+  const gd = gameDateOf(base, base + gs.elapsed);
+  const gameYear = gd.year;
+  const distanceKm = capitalDistKm(bAtt, bDef);
+  const navyAvailable = await hasNavy(bAtt);
+  const logistics = logisticsModifier(distanceKm, navyAvailable);
+  const readiness = readinessModifier(attMil.readiness);
+
+  // أسلحة المهاجم — تُضاف فقط إذا كانت متاحة تاريخيًا في سنة اللعبة
+  const attWRaw = await validateBattleWeapons(bAtt, weaponPick);
+  const attW = [];
+  for (const x of attWRaw) {
+    const availability = weaponAvailability(x, gameYear);
+    if (!availability.available) {
+      throw { status: 400, message: `السلاح "${x.name}" غير متاح تاريخيًا في سنة ${gameYear}. ${availability.reason}` };
+    }
+    attW.push(x);
+  }
   const attWPower = attW.reduce((s, x) => s + x.fp * x.qty, 0);
   // دعم المدافع التلقائي: أقوى 5 أصناف في ترسانته (بنصف الفعالية — أسلحة دفاعية مرتجلة)
   const defWRows = await all('SELECT id, name, class, quantity FROM weapons WHERE country_code=$1', [bDef]);
@@ -1526,7 +1545,8 @@ async function battleInternal(warId, attackerCC, units, region, actorUsername, w
     .map((x) => ({ ...x, qty: Math.min(x.avail, 150) }));
   const defWPower = defW.reduce((s, x) => s + x.fp * x.qty * 0.5, 0);
   const defUnits = Math.max(500, Math.round(Math.min(defMil.soldiers * 0.6, units * (0.9 + Math.random() * 0.3))));
-  const attP = battlePower(units, attMil) * strat.power + attWPower;
+  // المسافة والجاهزية تقللان القدرة القتالية؛ لا توجد قوة مجانية عبر القارات
+  const attP = battlePower(units, attMil) * strat.power * logistics * readiness + attWPower * logistics;
   const defP = battlePower(defUnits, defMil) * 1.1 + defWPower;
   const attWins = attP >= defP;
   const winner = attWins ? 'attacker' : 'defender';
@@ -1592,7 +1612,7 @@ async function battleInternal(warId, attackerCC, units, region, actorUsername, w
   const wTxt = attW.length ? ` — بالأسلحة: ${attW.map((x) => x.name + ' ×' + x.qty).join('، ')}` : '';
   const dirTxt = direction ? ` من ${direction}` : '';
   await emitEvent('battle', w.attacker_code, w.defender_code,
-    `⚔️ ${strat.name}${dirTxt}: ${wname} تنتصر${region ? ' في ' + region : ''} (خسائر المهاجم ${attLoss.toLocaleString('en-US')} / المدافع ${defLoss.toLocaleString('en-US')})${wTxt}${cityTxt} — نقاط الصحة: ${cname(bAtt)} ${Math.round(attHP.hp)}/${Math.round(attHP.max_hp)} · ${cname(bDef)} ${Math.round(defHP.hp)}/${Math.round(defHP.max_hp)}${colonized ? ' — 👑 ' + cname(colonized.overlord) + ' تستعمر ' + cname(colonized.colony) + '!' : ''}`,
+    `⚔️ ${strat.name}${dirTxt}: ${wname} تنتصر${region ? ' في ' + region : ''} (سنة ${gameYear}، مسافة ${Math.round(distanceKm).toLocaleString('en-US')} كم، معامل الإمداد ${logistics.toFixed(2)}) (خسائر المهاجم ${attLoss.toLocaleString('en-US')} / المدافع ${defLoss.toLocaleString('en-US')})${wTxt}${cityTxt} — نقاط الصحة: ${cname(bAtt)} ${Math.round(attHP.hp)}/${Math.round(attHP.max_hp)} · ${cname(bDef)} ${Math.round(defHP.hp)}/${Math.round(defHP.max_hp)}${colonized ? ' — 👑 ' + cname(colonized.overlord) + ' تستعمر ' + cname(colonized.colony) + '!' : ''}`,
     { war_id: w.id, battle_id: battleId });
   await audit('war_battle', actorUsername, `معركة في حرب #${w.id}: ${units} ضد ${defUnits} — الفائز: ${wname}`);
   await notifyCountry(bAtt, 'battle', attWins ? 'انتصار في المعركة!' : 'هزيمة في المعركة',
