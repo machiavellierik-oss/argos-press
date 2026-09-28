@@ -1004,6 +1004,80 @@ async function hqArticle(title, body, category) {
       [hq.id, title, body, category || 'wars', Date.now()]);
   } catch (e) { /* غير حرج */ }
 }
+// ---------- سيناريو الحرب التلقائي ----------
+// عند كل إعلان حرب يُنشر فورًا مقال «سيناريو حرب» مفصّل بأرقام حقيقية من بيانات اللعبة
+// (الجيوش + الترسانات الموثقة + موازين القوى). الإيقاف: system_settings.auto_war_scenario = '0'
+async function topWeaponsByClass(cc, perClass) {
+  const rows = await all('SELECT name, class, quantity FROM weapons WHERE country_code=$1', [cc]).catch(() => []);
+  const byClass = {};
+  for (const r of rows.sort((a, b) => (b.quantity || 0) - (a.quantity || 0))) {
+    const k = r.class || 'أخرى';
+    (byClass[k] = byClass[k] || []).push(r);
+  }
+  const out = [];
+  for (const cls of Object.keys(byClass))
+    for (const it of byClass[cls].slice(0, perClass || 2))
+      out.push({ cls, name: it.name, qty: it.quantity });
+  return out;
+}
+function fmtN(n) { return Number(n || 0).toLocaleString('en-US'); }
+async function publishWarScenario(attacker, target) {
+  try {
+    let autoOn = true; // الافتراضي: مفعّل — يُعطَّل فقط عند ضبط المفتاح صراحةً على '0'
+    try {
+      const sRow = await one("SELECT value FROM system_settings WHERE key='auto_war_scenario'").catch(() => null);
+      autoOn = !sRow || sRow.value !== '0';
+    } catch (e) { autoOn = true; }
+    if (!autoOn) return;
+    const A = cname(attacker), D = cname(target);
+    const aMil = await getArmy(attacker), dMil = await getArmy(target);
+    const gs = await gameState();
+    const base = gs.started_at || Date.now();
+    const gd = gameDateOf(base, base + gs.elapsed);
+    const gdate = `${ADV_MONTHS[gd.month - 1]} ${gd.year}`;
+    const ratio = dMil.soldiers > 0 ? aMil.soldiers / dMil.soldiers : 99;
+    const ratioTxt = dMil.soldiers > 0 ? (ratio >= 10 ? `${Math.round(ratio)} إلى 1` : ratio.toFixed(1) + ' إلى 1') : 'تفوق مطلق';
+    const wsum = (list) => list.length
+      ? list.map((w) => `- ${w.name} (${w.cls})${w.qty ? ` — ${fmtN(w.qty)} قطعة` : ''}`).join('\n')
+      : 'لا توجد بيانات تسليح موثقة لهذه الدولة في الأرشيف.';
+    const aW = await topWeaponsByClass(attacker, 2);
+    const dW = await topWeaponsByClass(target, 2);
+    let phases;
+    if (ratio >= 10) {
+      phases = `المرحلة 1 — الصدمة الأولى: ${A} تفتتح الحرب بقصف تمهيدي ثم هجوم كاسح مستفيدة من التفوق العددي الساحق. دفاعات ${D} — بـ${fmtN(dMil.soldiers)} جندي فقط — تنهار في المواجهات الأولى.\n` +
+        `المرحلة 2 — الانهيار: تتفكك خطوط ${D} تحت كثافة النيران، وتتساقط المدن تباعًا مع انهيار الروح المعنوية.\n` +
+        `المرحلة 3 — الحسم: استسلام أو سقوط العاصمة خلال أسابيع. النصر الساحق (فارق 50+ نقطة) يفتح الباب أمام الاستعمار الكامل: غنيمة فورية من الخزينة + جزية شهرية 25% من الجباية، ولا يبقى للمهزوم سوى خيار حرب الاستقلال.`;
+    } else if (ratio >= 3) {
+      phases = `المرحلة 1 — جس النبض: ${A} تتقدم بحذر وتختبر دفاعات ${D} بمعارك محدودة.\n` +
+        `المرحلة 2 — المعركة الفاصلة: حشد ${A} لتفوقها العددي (${ratioTxt}) في هجوم رئيسي يستهدف كسر العمود الفقري لجيش ${D}.\n` +
+        `المرحلة 3 — الحسم أو الاستنزاف: إما انهيار ${D} وقبول شروط قاسية (تعويضات أو استعمار عند فارق 50+ نقطة)، أو تحول الحرب إلى استنزاف يلتهم جاهزية الطرفين.`;
+    } else if (ratio >= 1) {
+      phases = `المرحلة 1 — حرب متوازنة: تقارب القوى (${ratioTxt}) يعني أن لا طرف يحسم سريعًا — معارك كر وفر على الجبهات.\n` +
+        `المرحلة 2 — الاستنزاف: الجاهزية والروح المعنوية هما سلاحا الحسم؛ أي طرف ينهار معنويًا أولًا يخسر المبادرة.\n` +
+        `المرحلة 3 — المفاوضات أو المقامرة: غالبًا ما تنتهي هذه الحروب بسلام تفاوضي، ما لم يقامر أحد الطرفين بهجوم شامل.`;
+    } else {
+      phases = `مفاجأة استراتيجية: ${A} تهاجم رغم أن ${D} تتفوق عدديًا (${fmtN(dMil.soldiers)} مقابل ${fmtN(aMil.soldiers)})! ` +
+        `رهان ${A} قد يكون على عنصر المفاجأة أو تفوق نوعي في التسليح والتدريب — أو أنها مغامرة محسوبة الخسارة. ` +
+        `إن صمدت ${D} في الأسابيع الأولى، ستنقلب الطاولة سريعًا.`;
+    }
+    const body = [
+      `أولًا: الشرارة`,
+      `في ${gdate}، أعلنت ${A} الحرب رسميًا على ${D}، لتشتعل جبهة جديدة في عالم 1900. غرفة حرب أرجوس تضع بين أيديكم السيناريو الكامل بالأرقام الموثقة.`,
+      `ثانيًا: موازين القوى (أرقام حقيقية من سجلات اللعبة)`,
+      `- ${A}: ${fmtN(aMil.soldiers)} جندي — الجاهزية ${aMil.readiness}%، الروح المعنوية ${aMil.morale}%، التدريب ${aMil.training}%.\n- ${D}: ${fmtN(dMil.soldiers)} جندي — الجاهزية ${dMil.readiness}%، الروح المعنوية ${dMil.morale}%، التدريب ${dMil.training}%.\n- نسبة التفوق العددي: ${ratioTxt} لصالح ${ratio >= 1 ? A : D}.`,
+      `ثالثًا: ترسانة ${A}`,
+      wsum(aW),
+      `رابعًا: ترسانة ${D}`,
+      wsum(dW),
+      `خامسًا: سيناريو المعارك المتوقعة`,
+      phases,
+      `سادسًا: التداعيات`,
+      `- داخليًا: الحرب تستنزف الاستقرار والدعم الشعبي لدى الطرفين — والمهزوم يدفع تعويضات أو جزية استعمارية.\n- إقليميًا: دول الجوار تراقب بقلق، والتحالفات الدفاعية قد تُفعَّل في أي لحظة.\n- على الخريطة: حدود الدولتين تُلوَّن بالأحمر في غرفة الحرب حتى إعلان السلام.`,
+      `(سيناريو تلقائي من غرفة حرب أرجوس — يُنشر فور إعلان أي حرب. الأرقام والأسلحة من أرشيف اللعبة الموثق.)`,
+    ].join('\n\n');
+    await hqArticle(`سيناريو حرب: ${A} × ${D}`, body, 'war');
+  } catch (e) { /* غير حرج — لا يوقف إعلان الحرب أبدًا */ }
+}
 async function notifyCountry(cc, ntype, title, body, link) {
   const owners = await ownersOf(cc);
   const tg = owners.length ? owners : await devIds();
@@ -1267,6 +1341,7 @@ async function declareWarInternal(attacker, target, actorUsername) {
   }
   await hqArticle(`عاجل: ${cname(attacker)} تعلن الحرب على ${cname(target)}`,
     `في تطور خطير، أعلنت ${cname(attacker)} الحرب رسميًا على ${cname(target)}. ترقبوا تغطية المعارك أولًا بأول في غرفة الحرب.`, 'wars');
+  await publishWarScenario(attacker, target); // سيناريو الحرب التلقائي المفصّل
   return warId;
 }
 // معركة — attackerCC يجب أن يكون الطرف المهاجم في الحرب
