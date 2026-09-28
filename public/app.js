@@ -647,28 +647,42 @@ function initGlobe3D(cv, rows, mstates) {
     new THREE.SphereGeometry(1, 72, 72),
     new THREE.MeshBasicMaterial({ map: earthTex })
   ));
-  // توهج الغلاف الجوي
-  const atm = new THREE.Mesh(
-    new THREE.SphereGeometry(1.16, 72, 72),
+  // توهج الغلاف الجوي — طبقتان: هالة داخلية ساطعة وهالة خارجية خافتة لعمق سينمائي
+  const atmInner = new THREE.Mesh(
+    new THREE.SphereGeometry(1.14, 72, 72),
     new THREE.ShaderMaterial({
-      uniforms: { c: { value: new THREE.Color(0x2a7fd4) } },
+      uniforms: { c: { value: new THREE.Color(0x3d9fe0) } },
       vertexShader: 'varying vec3 vN; void main(){ vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-      fragmentShader: 'varying vec3 vN; uniform vec3 c; void main(){ float i = pow(max(0.0, 0.66 - dot(vN, vec3(0.0, 0.0, 1.0))), 3.0); gl_FragColor = vec4(c, 1.0) * i; }',
+      fragmentShader: 'varying vec3 vN; uniform vec3 c; void main(){ float i = pow(max(0.0, 0.72 - dot(vN, vec3(0.0, 0.0, 1.0))), 3.5); gl_FragColor = vec4(c, 1.0) * i * 1.35; }',
       blending: THREE.AdditiveBlending, side: THREE.BackSide, transparent: true, depthWrite: false,
     })
   );
-  globe.add(atm);
-  // نجوم
-  const sp = [];
-  for (let i = 0; i < 500; i++) {
-    const v = new THREE.Vector3(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1);
-    if (v.lengthSq() > 1 || v.lengthSq() < 0.01) { i--; continue; }
-    v.normalize().multiplyScalar(25 + Math.random() * 40);
-    sp.push(v.x, v.y, v.z);
-  }
-  const starGeo = new THREE.BufferGeometry();
-  starGeo.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
-  scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0x8aa8c8, size: 0.09, transparent: true, opacity: 0.75 })));
+  globe.add(atmInner);
+  const atmOuter = new THREE.Mesh(
+    new THREE.SphereGeometry(1.32, 72, 72),
+    new THREE.ShaderMaterial({
+      uniforms: { c: { value: new THREE.Color(0x1e5f9e) } },
+      vertexShader: 'varying vec3 vN; void main(){ vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: 'varying vec3 vN; uniform vec3 c; void main(){ float i = pow(max(0.0, 0.62 - dot(vN, vec3(0.0, 0.0, 1.0))), 4.0); gl_FragColor = vec4(c, 1.0) * i * 0.5; }',
+      blending: THREE.AdditiveBlending, side: THREE.BackSide, transparent: true, depthWrite: false,
+    })
+  );
+  globe.add(atmOuter);
+  // نجوم — طبقتان بأحجام وألوان متباينة لعمق أكبر
+  const mkStars = (n, color, size, op) => {
+    const sp = [];
+    for (let i = 0; i < n; i++) {
+      const v = new THREE.Vector3(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1);
+      if (v.lengthSq() > 1 || v.lengthSq() < 0.01) { i--; continue; }
+      v.normalize().multiplyScalar(25 + Math.random() * 40);
+      sp.push(v.x, v.y, v.z);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
+    scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color, size, transparent: true, opacity: op })));
+  };
+  mkStars(420, 0x8aa8c8, 0.085, 0.7);
+  mkStars(90, 0xd8c9a8, 0.13, 0.55);
   // حدود سنة 1900: كل كيان بخط خافت، وحدود كل دولة قابلة للعب ملوّنة حسب حالتها
   // (تعديلات المطورين: لون مخصص وحدود مرسومة تتفوق على التلقائي)
   const CODE_OF = {};
@@ -685,7 +699,7 @@ function initGlobe3D(cv, rows, mstates) {
   };
   loadBorders1900().then((data) => {
     if (!document.body.contains(cv)) return;
-    globe.add(buildBorderLines(data, (nm, isP) => !isP, 1.002, 0x5f7285, 0.45));
+    globe.add(buildBorderLines(data, (nm, isP) => !isP, 1.002, 0x6b7f93, 0.5));
     const skipNames = new Set();
     (mstates || []).forEach((s) => {
       const nm = GEO_NAME_OF[s.country_code];
@@ -702,7 +716,7 @@ function initGlobe3D(cv, rows, mstates) {
         (nm, isP) => isP && set.has(nm) && !skipNames.has(nm), 1.004, parseInt(col.slice(1), 16), 0.95));
     });
     globe.add(buildBorderLines(data,
-      (nm, isP) => isP && !skipNames.has(nm) && !finalColor(CODE_OF[nm]), 1.004, 0x8a97a5, 0.55));
+      (nm, isP) => isP && !skipNames.has(nm) && !finalColor(CODE_OF[nm]), 1.004, 0xa3b4c4, 0.62));
     // حدود مرسومة يدويًا من المطورين
     (mstates || []).forEach((s) => {
       if (!s.borders_geojson) return;
@@ -740,6 +754,7 @@ function initGlobe3D(cv, rows, mstates) {
   const SEVC = { RED: 0xf4212e, ORANGE: 0xff9f0a, YELLOW: 0xffd400 };
   const glowTex = makeGlowTexture();
   const markers = [];
+  const shockRings = []; // حلقات صدمة متوسعة للدول شديدة الاشتعال (RED)
   rows.forEach((r) => {
     if (r.lat == null || r.lon == null) return;
     const col = SEVC[r.severity] || 0xffd400;
@@ -751,6 +766,13 @@ function initGlobe3D(cv, rows, mstates) {
     core.scale.setScalar(0.07);
     globe.add(halo); globe.add(core);
     markers.push({ halo, phase: Math.random() * 6.28 });
+    if (r.severity === 'RED') {
+      const ring = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: col, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.7 }));
+      ring.position.copy(halo.position);
+      ring.scale.setScalar(0.25);
+      globe.add(ring);
+      shockRings.push({ ring, t: Math.random() });
+    }
   });
   // علامات إعلانات المطورين: حالة حرب / طوارئ (حتى للدول الهادئة)
   (mstates || []).forEach((s) => {
@@ -792,6 +814,11 @@ function initGlobe3D(cv, rows, mstates) {
       const p = (Math.sin(t * 2.4 + m.phase) + 1) / 2;
       m.halo.scale.setScalar(0.18 + p * 0.14);
       m.halo.material.opacity = 0.55 + p * 0.45;
+    });
+    shockRings.forEach((rg) => {
+      rg.t += 0.014; if (rg.t > 1) rg.t = 0;
+      rg.ring.scale.setScalar(0.22 + rg.t * 0.55);
+      rg.ring.material.opacity = 0.75 * (1 - rg.t);
     });
     renderer.render(scene, camera);
     requestAnimationFrame(tick);
