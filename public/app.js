@@ -160,7 +160,7 @@ async function hydrateEngagement(type) {
 // ---------- القائمة الجانبية (درج بأقسام) والودجت ----------
 const NAV_SECTIONS = [
   { t: '', links: [['#/', 'الرئيسية', 'home']] },
-  { t: 'الحرب', links: [['#/news', 'غرفة الحرب', 'globe'], ['#/wars', 'الحروب', 'swords'], ['#/diplomacy', 'الدبلوماسية', 'doc'], ['#/intel', 'الاستخبارات', 'search']] },
+  { t: 'الحرب', links: [['#/news', 'غرفة الحرب', 'globe'], ['#/wars', 'الحروب', 'swords'], ['#/workshop', 'مختبر الأسلحة', 'zap'], ['#/diplomacy', 'الدبلوماسية', 'doc'], ['#/intel', 'الاستخبارات', 'search']] },
   { t: 'المستشار', links: [['#/advisor', 'المستشار', 'shield'], ['#/cabinet', 'مجلس الوزراء', 'users']] },
   { t: 'الاقتصاد', links: [['#/economy', 'الاقتصاد والسكان', 'coin']] },
   { t: 'التجارة', links: [['#/market', 'السوق العام', 'swords']] },
@@ -506,36 +506,50 @@ async function vNews() {
         <div class="war-hero-tx">
           <div class="war-kicker">خريطة الصراع المباشرة</div>
           <h2>مسرح عمليات أرجوس</h2>
-          <p>رصد حي لنشاط الدول — البرقيات والبيانات والتقارير الحربية خلال آخر 30 يومًا.</p>
+          <p>الكرة تعرض الحروب النشطة والمستعمرات لحظة بلحظة — الأحمر دولة في حرب، والقرمزي مستعمَرة.</p>
           <div class="war-legend">
-            <span><i class="dot" style="background:#f4212e"></i>مرتفع</span>
-            <span><i class="dot" style="background:#ff9f0a"></i>متوسط</span>
-            <span><i class="dot" style="background:#ffd400"></i>منخفض</span>
+            <span><i class="dot" style="background:#f4212e"></i>في حرب</span>
+            <span><i class="dot" style="background:#8e1e2f"></i>مستعمَرة</span>
             <span><i class="dot" style="background:transparent;border:1.5px dashed #f4212e"></i>أراضٍ محتلة</span>
             <span class="hint">لون حدود كل دولة = حالتها</span>
           </div>
         </div>
       </div>
       <div id="clockbox"></div>
-      <div class="war-sec"><div class="war-sec-t">إعلانات المطورين — حالات الحرب والطوارئ</div><div id="wdecl"><div class="spin"></div></div></div>
       <div id="mapeditor"></div>
-      <div class="war-sec"><div class="war-sec-t">شدة الصراع — نافذة 30 يومًا</div><div id="wtable"><div class="spin"></div></div></div>
-      <div class="war-sec"><div class="war-sec-t">الموجز اليومي</div><div id="wbriefs"><div class="spin"></div></div></div>
+      <div class="war-sec"><div class="war-sec-t">${ICONS.swords} الحروب النشطة</div><div id="wactivewars"><div class="spin"></div></div>
+        <p class="hint" style="margin-top:8px"><a href="#/wars">إدارة الحروب والمعارك ←</a></p></div>
       <div class="war-sec"><div class="war-sec-t" id="army-sec-t">جيش دولتك — تعداد 1900</div><p class="hint" id="army-sec-hint" style="margin:0 0 10px"></p><div id="warmies"><div class="spin"></div></div></div>
       <div id="armymgr"></div>`;
-  let rows = [], mstates = [];
-  try { const d = await api('GET', '/conflict'); rows = d.rows || []; }
+  let wars = [], mstates = [], colonies = [];
+  try { const d = await api('GET', '/wars'); wars = (d.wars || []).filter((w) => w.status === 'active'); }
   catch (e) { /* يبقى فارغًا */ }
   try { const m = await api('GET', '/map-states'); mstates = m.states || []; }
   catch (e) { /* يبقى فارغًا */ }
-  initGlobe(rows, mstates);
-  renderWarTable(rows, mstates);
-  renderBriefs(rows);
-  renderDeclarations(mstates);
+  try { const c = await api('GET', '/colonies'); colonies = c.colonies || []; }
+  catch (e) { /* يبقى فارغًا */ }
+  initGlobe({ wars, colonies }, mstates);
+  renderActiveWarsMini(wars);
   if (me && me.role === 'developer') renderMapEditor(mstates);
   await renderArmiesSection();
   if (me && me.role === 'developer') renderArmyManager();
   mountClock(document.getElementById('clockbox'));
+}
+function hpBar(hp, max) {
+  const pct = max > 0 ? Math.max(0, Math.min(100, Math.round((hp / max) * 100))) : 0;
+  const col = pct > 60 ? '#3ddc84' : pct > 30 ? '#ffb020' : '#f4212e';
+  return `<span class="hp-wrap" title="نقاط الصحة: ${hp}/${max}"><span class="hp-bar"><i style="width:${pct}%;background:${col}"></i></span><span class="hp-num" dir="ltr">${hp}/${max}</span></span>`;
+}
+function renderActiveWarsMini(wars) {
+  const el = document.getElementById('wactivewars'); if (!el) return;
+  if (!wars.length) { el.innerHTML = '<div class="empty">لا حروب نشطة — العالم يعيش سلامًا هشًا.</div>'; return; }
+  el.innerHTML = '<div class="wpn-grid">' + wars.slice(0, 6).map((w) => {
+    const a = countryOf(w.attacker_code), df = countryOf(w.defender_code);
+    return `<div class="wpn-card"><div class="wpn-tx"><b>${a.flag} ${esc(w.attacker_name)} <span class="hint">ضد</span> ${df.flag} ${esc(w.defender_name)}</b>`
+      + `<span class="hint">${a.flag} ${hpBar(w.attacker_hp.hp, w.attacker_hp.max_hp)}</span>`
+      + `<span class="hint">${df.flag} ${hpBar(w.defender_hp.hp, w.defender_hp.max_hp)}</span>`
+      + `</div></div>`;
+  }).join('') + '</div>';
 }
 let THREE_PROMISE = null;
 function loadThree(ok, fail) {
@@ -627,12 +641,12 @@ function buildCustomLines(geom, radius, color, opacity) {
   bg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   return new THREE.LineSegments(bg, new THREE.LineBasicMaterial({ color, transparent: true, opacity }));
 }
-function initGlobe(rows, mstates) {
+function initGlobe(warInfo, mstates) {
   const cv = document.getElementById('wglobe'); if (!cv) return;
-  loadThree(() => { try { initGlobe3D(cv, rows, mstates); } catch (e) { initGlobeFallback(cv, rows); } },
-            () => initGlobeFallback(cv, rows));
+  loadThree(() => { try { initGlobe3D(cv, warInfo, mstates); } catch (e) { initGlobeFallback(cv, warInfo); } },
+            () => initGlobeFallback(cv, warInfo));
 }
-function initGlobe3D(cv, rows, mstates) {
+function initGlobe3D(cv, warInfo, mstates) {
   const holder = cv.parentElement;
   const renderer = new THREE.WebGLRenderer({ canvas: cv, alpha: true, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -683,19 +697,23 @@ function initGlobe3D(cv, rows, mstates) {
   };
   mkStars(420, 0x8aa8c8, 0.085, 0.7);
   mkStars(90, 0xd8c9a8, 0.13, 0.55);
-  // حدود سنة 1900: كل كيان بخط خافت، وحدود كل دولة قابلة للعب ملوّنة حسب حالتها
+  // حدود سنة 1900: تلوين حسب حالة الحرب — أحمر = في حرب، قرمزي = مستعمَرة
   // (تعديلات المطورين: لون مخصص وحدود مرسومة تتفوق على التلقائي)
   const CODE_OF = {};
   Object.entries(GEO_NAME_OF).forEach(([c, n]) => { CODE_OF[n] = c; });
-  const sevByCode = {};
-  rows.forEach((r) => { sevByCode[r.code] = r.severity; });
+  const wi = warInfo || {};
+  const wars = wi.wars || [];
+  const colonySet = new Set((wi.colonies || []).map((c) => c.colony_code));
+  const warSet = new Set();
+  wars.forEach((w) => { warSet.add(w.attacker_code); warSet.add(w.defender_code); });
   const ovByCode = {};
   (mstates || []).forEach((s) => { ovByCode[s.country_code] = s; });
-  const SEV_HEX = { RED: '#f4212e', ORANGE: '#ff9f0a', YELLOW: '#ffd400' };
   const finalColor = (code) => {
     const ov = ovByCode[code];
     if (ov && ov.color) return ov.color;
-    return SEV_HEX[sevByCode[code]] || null;
+    if (colonySet.has(code)) return '#8e1e2f';
+    if (warSet.has(code)) return '#f4212e';
+    return null;
   };
   loadBorders1900().then((data) => {
     if (!document.body.contains(cv)) return;
@@ -750,29 +768,29 @@ function initGlobe3D(cv, rows, mstates) {
       });
     });
   }).catch(() => {});
-  // علامات الدول المشتعلة
-  const SEVC = { RED: 0xf4212e, ORANGE: 0xff9f0a, YELLOW: 0xffd400 };
+  // علامات الدول المتحاربة — نابضة مع حلقات صدمة
   const glowTex = makeGlowTexture();
   const markers = [];
-  const shockRings = []; // حلقات صدمة متوسعة للدول شديدة الاشتعال (RED)
-  rows.forEach((r) => {
-    if (r.lat == null || r.lon == null) return;
-    const col = SEVC[r.severity] || 0xffd400;
+  const shockRings = [];
+  const addMarker = (lat, lon, col) => {
+    if (lat == null || lon == null) return;
     const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: col, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.9 }));
-    halo.position.copy(latLonToVec3(r.lat, r.lon, 1.004));
+    halo.position.copy(latLonToVec3(lat, lon, 1.004));
     halo.scale.setScalar(0.22);
     const core = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xffffff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
     core.position.copy(halo.position);
     core.scale.setScalar(0.07);
     globe.add(halo); globe.add(core);
     markers.push({ halo, phase: Math.random() * 6.28 });
-    if (r.severity === 'RED') {
-      const ring = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: col, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.7 }));
-      ring.position.copy(halo.position);
-      ring.scale.setScalar(0.25);
-      globe.add(ring);
-      shockRings.push({ ring, t: Math.random() });
-    }
+    const ring = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: col, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.7 }));
+    ring.position.copy(halo.position);
+    ring.scale.setScalar(0.25);
+    globe.add(ring);
+    shockRings.push({ ring, t: Math.random() });
+  };
+  wars.forEach((w) => {
+    addMarker(w.attacker_lat, w.attacker_lon, 0xf4212e);
+    addMarker(w.defender_lat, w.defender_lon, 0xf4212e);
   });
   // علامات إعلانات المطورين: حالة حرب / طوارئ (حتى للدول الهادئة)
   (mstates || []).forEach((s) => {
@@ -825,7 +843,7 @@ function initGlobe3D(cv, rows, mstates) {
   })();
 }
 // بديل بسيط لو تعذّر تحميل Three.js
-function initGlobeFallback(cv, rows) {
+function initGlobeFallback(cv, warInfo) {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   let W = 0, H = 0, R = 0;
   const fit = () => {
@@ -852,7 +870,12 @@ function initGlobeFallback(cv, rows) {
     const y1 = y * ct - z1 * st, z2 = y * st + z1 * ct;
     return [W / 2 + x1 * R, H / 2 - y1 * R, z2];
   };
-  const SEVC = { RED: '#f4212e', ORANGE: '#ff9f0a', YELLOW: '#ffd400' };
+  const SEVC = { war: '#f4212e' };
+  const warPts = [];
+  ((warInfo && warInfo.wars) || []).forEach((w) => {
+    if (w.attacker_lat != null) warPts.push([w.attacker_lat, w.attacker_lon]);
+    if (w.defender_lat != null) warPts.push([w.defender_lat, w.defender_lon]);
+  });
   let t = 0;
   (function draw() {
     if (!document.body.contains(cv)) return;
@@ -869,12 +892,11 @@ function initGlobeFallback(cv, rows) {
       const s = Math.max(1, dpr * 0.85);
       ctx.fillRect(p[0], p[1], s, s);
     }
-    for (const r of rows) {
-      if (r.lat == null || r.lon == null) continue;
-      const la = r.lat * Math.PI / 180, lo = r.lon * Math.PI / 180;
+    for (const pt of warPts) {
+      const la = pt[0] * Math.PI / 180, lo = pt[1] * Math.PI / 180;
       const p = proj(Math.cos(la) * Math.cos(lo), Math.sin(la), -Math.cos(la) * Math.sin(lo));
       if (p[2] < 0.02) continue;
-      const col = SEVC[r.severity] || '#ffd400';
+      const col = SEVC.war;
       const pulse = (Math.sin(t * 2.2) + 1) / 2;
       ctx.beginPath(); ctx.arc(p[0], p[1], (4 + pulse * 5) * dpr, 0, 7);
       ctx.fillStyle = col + '2e'; ctx.fill();
@@ -883,61 +905,6 @@ function initGlobeFallback(cv, rows) {
     }
     requestAnimationFrame(draw);
   })();
-}
-function renderWarTable(rows, mstates) {
-  const el = document.getElementById('wtable'); if (!el) return;
-  if (!rows.length) {
-    el.innerHTML = '<div class="empty"><span class="e-ic">' + ICONS.flame + '</span>لا توجد تقارير بعد — كن أول من يشعل مسرح العمليات.</div>';
-    return;
-  }
-  const stByCode = {};
-  (mstates || []).forEach((s) => { if (s.status) stByCode[s.country_code] = s.status; });
-  const ST_AR = { war: 'حالة حرب', emergency: 'حالة طوارئ', peace: 'سلم' };
-  el.innerHTML = `<div class="war-table">` + rows.map((r) => `
-    <div class="war-row sev-${r.severity}">
-      <span class="war-flag">${r.flag}</span>
-      <span class="war-name">${esc(r.name)}${stByCode[r.code] ? ` <span class="st-badge st-${stByCode[r.code]}">${ST_AR[stByCode[r.code]]}</span>` : ''}</span>
-      <span class="war-sev">${SEV_AR[r.severity]}</span>
-      <span class="war-num"><b>${r.war}</b><i>تقارير حرب</i></span>
-      <span class="war-num"><b>${r.mentions}</b><i>كل الإشارات</i></span>
-      <span class="war-trend tr-${r.trend}">${TREND_AR[r.trend]}</span>
-    </div>`).join('') + `</div>
-    <div class="war-upd">آخر تحديث: ${new Date().toLocaleString('ar-EG')} · نافذة 30 يومًا</div>`;
-}
-function renderBriefs(rows) {
-  const el = document.getElementById('wbriefs'); if (!el) return;
-  const top = rows.filter((r) => r.brief && r.brief.length).slice(0, 6);
-  if (!top.length) { el.innerHTML = '<div class="empty">لا توجد موجزات بعد.</div>'; return; }
-  el.innerHTML = top.map((r) => `
-    <article class="war-brief">
-      <header>
-        <span class="war-flag">${r.flag}</span>
-        <div class="war-brief-tx"><b>${esc(r.name)}</b><time>${new Date().toLocaleDateString('ar-EG')}</time></div>
-        <span class="war-sev">${SEV_AR[r.severity]}</span>
-      </header>
-      <ul>${r.brief.map((b) => `<li>${esc(b)}</li>`).join('')}</ul>
-      ${r.user ? `<a class="war-more" href="#/u/${encodeURIComponent(r.user)}">ملف الدولة ←</a>`
-               : `<a class="war-more" href="#/cat/war">تقارير الحرب ←</a>`}
-    </article>`).join('');
-}
-
-// ---------- إعلانات المطورين: حالات الحرب والطوارئ ----------
-const MAP_ST_AR = { war: 'حالة حرب', emergency: 'حالة طوارئ', peace: 'سلم معلن', revolt: 'ثورة شعبية' };
-function renderDeclarations(mstates) {
-  const el = document.getElementById('wdecl'); if (!el) return;
-  const order = { war: 0, emergency: 1, revolt: 2, peace: 3 };
-  const list = (mstates || []).filter((s) => s.status).sort((a, b) => order[a.status] - order[b.status]);
-  if (!list.length) { el.innerHTML = '<div class="empty">لا توجد إعلانات حالية.</div>'; return; }
-  el.innerHTML = '<div class="wdecl-list">' + list.map((s) => {
-    const c = countryOf(s.country_code);
-    const occ = (typeof OCCUPIED_TERRITORIES !== 'undefined') ? OCCUPIED_TERRITORIES.filter((t) => t.occupier === s.country_code) : [];
-    const occLine = (occ.length && (s.status === 'war' || s.status === 'emergency'))
-      ? `<div class="wdecl-occ">الأراضي المحتلة: ${occ.map((t) => esc(t.name)).join('، ')}</div>` : '';
-    return `<div class="wdecl"><span class="war-flag">${c.flag}</span>
-      <div class="wdecl-tx"><b>${esc(c.name)}</b>${s.label ? `<span> — ${esc(s.label)}</span>` : ''}${occLine}
-      <time>${s.updated_at ? new Date(s.updated_at).toLocaleDateString('ar-EG') : ''}</time></div>
-      <span class="st-badge st-${s.status}">${MAP_ST_AR[s.status]}</span></div>`;
-  }).join('') + '</div>';
 }
 
 // ---------- جيوش الدول وتسليح 1900 ----------
@@ -2135,6 +2102,7 @@ async function renderAdminTab(body) {
     <p class="hint">أدوات خطيرة — للمطورين فقط. تصفير الشركات يحذف كل الشركات نهائيًا ولا رجعة فيه.</p>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <button class="btn danger" style="width:auto;padding:10px 20px" onclick="wipeCompanies()">${ICONS.trash} تصفير جميع الشركات</button>
+      <button class="btn danger" style="width:auto;padding:10px 20px" onclick="endAllWars()">🕊️ إنهاء كل الحروب النشطة</button>
       <button class="btn" style="width:auto;padding:10px 20px" onclick="anchorClock()">↺ الساعة: 1900-01-01 منذ 6 مساء GMT اليوم</button>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center">
@@ -2218,6 +2186,14 @@ async function wipeCompanies() {
   try {
     const r = await api('POST', '/admin/wipe-companies');
     msg('تم تصفير الشركات ✓ — حُذفت ' + r.deleted + ' شركة', true);
+  } catch (e) { msg(e.message, false); }
+}
+async function endAllWars() {
+  if (!confirm('إنهاء كل الحروب النشطة في العالم فورًا (وقف إطلاق نار شامل)؟')) return;
+  if (!confirm('تأكيد أخير — كل الحروب ستتحول لمنتهية!')) return;
+  try {
+    const r = await api('POST', '/admin/end-all-wars');
+    msg(`🕊️ تم إنهاء ${r.ended} حربًا — العالم في سلام`, true);
   } catch (e) { msg(e.message, false); }
 }
 async function anchorClock() {
@@ -2561,35 +2537,41 @@ async function vWars() {
   const myCC = me && me.country_code;
   const colonies = (col && col.colonies) || [];
   const mine = (w) => myCC && (w.attacker_code === myCC || w.defender_code === myCC);
-  const myDiff = (w) => w.attacker_code === myCC ? w.score_a - w.score_b : w.score_b - w.score_a;
   const card = (w) => {
     const a = countryOf(w.attacker_code), df = countryOf(w.defender_code);
     const active = w.status === 'active';
-    const canColonize = active && mine(w) && myDiff(w) >= 50;
+    const enemyCC = myCC === w.attacker_code ? w.defender_code : w.attacker_code;
     return `<div class="wpn-card"><div class="wpn-tx">
       <b>${a.flag} ${esc(w.attacker_name)} <span class="hint">ضد</span> ${df.flag} ${esc(w.defender_name)}</b>
       <span class="co-badge ${active ? 'rej' : ''}">${active ? 'نشطة' : 'منتهية'}</span>
       <span>نقاط الحرب: <b dir="ltr">${w.score_a} : ${w.score_b}</b></span>
+      <span class="hint">${a.flag} ${hpBar(w.attacker_hp.hp, w.attacker_hp.max_hp)}</span>
+      <span class="hint">${df.flag} ${hpBar(w.defender_hp.hp, w.defender_hp.max_hp)}</span>
       <span class="me-btns">
         <button class="btn ghost sm" onclick="warBattles(${w.id})">تفاصيل/معارك</button>
-        ${active && mine(w) ? `<button class="btn sm" onclick="warBattle(${w.id})">شن معركة</button>
-        <button class="btn ghost sm" onclick="warPeace(${w.id})">سلام</button>
-        ${canColonize ? `<button class="btn sm" onclick="warColonize(${w.id})">👑 استعمار</button>` : ''}` : ''}
+        ${active && mine(w) ? `<button class="btn sm" onclick="warBattle(${w.id},'${enemyCC}')">شن معركة</button>
+        <button class="btn ghost sm" onclick="warPeace(${w.id})">سلام</button>` : ''}
       </span>
       <div id="wb-${w.id}"></div>
     </div></div>`;
   };
   const myColonies = myCC ? colonies.filter((c) => c.overlord_code === myCC) : [];
   const myOverlord = myCC ? colonies.find((c) => c.colony_code === myCC) : null;
-  const colSec = `<div class="war-sec"><div class="war-sec-t">👑 المستعمرات (${colonies.length})</div>
+  const colSec = `<div class="war-sec colony-theater"><div class="war-sec-t colony-title">👑 المستعمرات (${colonies.length})</div>
     ${myOverlord ? `<div class="wpn-card"><div class="wpn-tx"><b>أنت مستعمَرة لـ ${myOverlord.overlord_code ? countryOf(myOverlord.overlord_code).flag : ''} ${esc(myOverlord.overlord_name)}</b>
       <span class="hint">تدفع جزية شهرية ${myOverlord.tribute_pct}% من جبايتك — ولا تعلن الحرب إلا حرب استقلال ضده.</span></div></div>` : ''}
-    ${myColonies.length ? '<div class="wpn-grid">' + myColonies.map((c) => `<div class="wpn-card"><div class="wpn-tx">
-      <b>${countryOf(c.colony_code).flag} ${esc(c.colony_name)}</b>
-      <span class="hint">جزية شهرية ${c.tribute_pct}% من جبايتها</span>
+    ${myColonies.length ? '<div class="colony-routes">' + myColonies.map((c) => `<div class="colony-route">
+      <span class="cr-over">${countryOf(myCC).flag} ${esc(countryOf(myCC).name)}</span>
+      <span class="cr-line"></span>
+      <span class="cr-col">${countryOf(c.colony_code).flag} ${esc(c.colony_name)}</span>
+      <span class="hint">جزية ${c.tribute_pct}%</span>
       <span class="me-btns"><button class="btn ghost sm" onclick="colonyRelease('${c.colony_code}')">تحرير 🕊️</button></span>
-    </div></div>`).join('') + '</div>' : (myOverlord ? '' : '<div class="empty">لا مستعمرات بعد — اسحق عدوك بفرق 50+ نقطة ثم استعمره.</div>')}
-    ${colonies.length && !myCC ? '<div class="wpn-grid">' + colonies.map((c) => `<div class="wpn-card"><div class="wpn-tx"><b>${countryOf(c.colony_code).flag} ${esc(c.colony_name)}</b><span class="hint">مستعمَرة لـ ${esc(c.overlord_name)}</span></div></div>`).join('') + '</div>' : ''}
+    </div>`).join('') + '</div>' : (myOverlord ? '' : '<div class="empty">لا مستعمرات بعد — أَفنِ نقاط صحة عدوك في المعارك لتستعمره.</div>')}
+    ${colonies.length && !myCC ? '<div class="colony-routes">' + colonies.map((c) => `<div class="colony-route">
+      <span class="cr-over">${countryOf(c.overlord_code).flag} ${esc(c.overlord_name)}</span>
+      <span class="cr-line"></span>
+      <span class="cr-col">${countryOf(c.colony_code).flag} ${esc(c.colony_name)}</span>
+    </div>`).join('') + '</div>' : ''}
   </div>`;
   const declareBox = myCC ? `<div class="war-sec"><div class="war-sec-t">${ICONS.swords} إعلان حرب</div>
       <div class="map-ed"><div class="field"><label>الدولة المستهدفة</label>
@@ -2617,8 +2599,10 @@ async function warBattles(id) {
       ? `<br><span class="hint">${label}: ${list.map((x) => esc(x.weapon_name) + ' ×' + x.qty + (x.lost ? ` (فُقد ${x.lost})` : '')).join('، ')}</span>` : '';
     box.innerHTML = bs.length ? '<div class="liq-log">' + bs.map((b) => {
       const bw = b.weapons || [];
-      return `<div class="liq-row"><span class="liq-rs"><b>${esc(b.winner_name || '')}</b>${b.region ? ' · ' + esc(b.region) : ''}
-        <br><span class="hint">القوة <span dir="ltr">${fmtPop(b.att_units)}/${fmtPop(b.def_units)}</span> · الخسائر <span dir="ltr">${fmtPop(b.att_losses)}/${fmtPop(b.def_losses)}</span></span>`
+      const strat = (STRATEGIES[b.strategy] || {}).name;
+      const cityLine = b.target_city ? `<br><span class="hint">🏙️ ${esc(b.target_city)}${b.direction ? ' — من ' + esc(b.direction) : ''} · دمار ${b.city_damage_pct || 0}% · قتلى مدنيون ${fmtPop(b.city_casualties || 0)}</span>` : (b.direction ? `<br><span class="hint">🧭 من ${esc(b.direction)}</span>` : '');
+      return `<div class="liq-row"><span class="liq-rs"><b>${esc(b.winner_name || '')}</b>${strat ? ' · 🎯 ' + strat : ''}${b.region ? ' · ' + esc(b.region) : ''}
+        <br><span class="hint">القوة <span dir="ltr">${fmtPop(b.att_units)}/${fmtPop(b.def_units)}</span> · الخسائر <span dir="ltr">${fmtPop(b.att_losses)}/${fmtPop(b.def_losses)}</span> · صحة الطرفين <span dir="ltr">${b.att_hp ?? '—'}/${b.def_hp ?? '—'}</span></span>${cityLine}`
         + wline(bw.filter((x) => x.side === 'attacker'), 'أسلحة الهجوم')
         + wline(bw.filter((x) => x.side === 'defender'), 'أسلحة الدفاع')
         + `</span></div>`;
@@ -2635,17 +2619,35 @@ async function warDeclare() {
 }
 // قوة النيران لكل صنف سلاح (للعرض — القيم الفعلية تُحسب في السيرفر)
 const WFP = { 'بنادق': 1, 'مسدسات': 0.3, 'رشاشات': 6, 'هاونات': 12, 'مدفعية ميدانية': 25, 'مدفعية جبلية': 18, 'مدفعية ثقيلة': 40, 'مدفعية حصار': 60, 'أسلحة أخرى': 4, 'سفن حربية': 50, 'طيران': 30 };
-async function warBattle(id) {
+// استراتيجيات الهجوم (للعرض — القيم الفعلية تُحسب في السيرفر)
+const STRATEGIES = {
+  assault:   { name: 'هجوم مباشر', desc: 'اشتباك تقليدي متوازن' },
+  blitz:     { name: 'هجوم خاطف', desc: 'سرعة وحسم — خسائر أعلى للطرفين' },
+  siege:     { name: 'حصار', desc: 'خنق بطيء يدمر المدينة المحاصَرة' },
+  artillery: { name: 'قصف مدفعي', desc: 'تدمير مركز للمدن والتحصينات' },
+  naval:     { name: 'قصف بحري', desc: 'بوارج تدك الساحل — دمار مدني هائل' },
+  guerrilla: { name: 'حرب عصابات', desc: 'كمائن واستنزاف بخسائر قليلة' },
+};
+const DIRECTIONS = ['الشمال', 'الجنوب', 'الشرق', 'الغرب', 'من البحر'];
+async function warBattle(id, defenderCC) {
   const myCC = me && me.country_code;
   if (!myCC) return;
-  let arsenal = [];
+  let arsenal = [], defCities = [];
   try { arsenal = ((await api('GET', '/armies/' + myCC)).weapons || []).filter((w) => (WFP[w.class] || 0) > 0); }
   catch (e) { alert(e.message); return; }
+  try { const g = await api('GET', '/meta/geo'); defCities = (g.cities && g.cities[defenderCC]) || []; }
+  catch (e) { /* بلا مدن */ }
   const ov = document.createElement('div');
   ov.className = 'modal-ov';
   ov.innerHTML = `<div class="modal-card">
-    <div class="m-head"><b>شن معركة — الجنود والأسلحة</b><button class="m-x" id="wbx">✕</button></div>
+    <div class="m-head"><b>شن معركة — الخطة والجنود والأسلحة</b><button class="m-x" id="wbx">✕</button></div>
     <div class="m-msg"></div>
+    <div class="field"><label>🎯 استراتيجية الهجوم</label>
+      <select id="wbstrat">${Object.entries(STRATEGIES).map(([k, v]) => `<option value="${k}">${v.name} — ${v.desc}</option>`).join('')}</select></div>
+    <div class="field"><label>🧭 اتجاه الهجوم (من أين تهجم؟)</label>
+      <select id="wbdir"><option value="">— غير محدد —</option>${DIRECTIONS.map((d) => `<option>${d}</option>`).join('')}</select></div>
+    <div class="field"><label>🏙️ المدينة المستهدفة (اختياري — قصفها يدمرها ويخفض إنتاج مصانعها ويقتل مدنيين)</label>
+      <select id="wbcity"><option value="">— معركة ميدانية بلا استهداف مدينة —</option>${defCities.map((c) => `<option>${esc(c)}</option>`).join('')}</select></div>
     <div class="field"><label>عدد جنود الهجوم (1000 على الأقل)</label>
       <input id="wbunits" type="number" min="1000" value="5000" dir="ltr"></div>
     <div class="field"><label>أسلحة الدعم من ترسانتك (اختياري — حتى 6 أصناف)</label>
@@ -2659,7 +2661,7 @@ async function warBattle(id) {
       }</div></div>
     <p class="hint" id="wbpower"></p>
     <div class="me-btns"><button class="btn sm" id="wbfire">شن المعركة</button></div>
-    <p class="hint">الأسلحة المُرسلة تُفقد جزئيًا في المعركة (5-10% للمنتصر، 20-30% للمنهزم) وتُخصم من مخزونك. المدافع يدعم تلقائيًا من ترسانته.</p>
+    <p class="hint">الأسلحة المُرسلة تُفقد جزئيًا في المعركة (5-10% للمنتصر، 20-30% للمنهزم) وتُخصم من مخزونك. المدافع يدعم تلقائيًا من ترسانته. المعارك تُنقص نقاط صحة الدولتين — ومن تصل صحته لصفر يُستعمَر.</p>
   </div>`;
   document.body.appendChild(ov);
   const m = (t, ok) => { ov.querySelector('.m-msg').innerHTML = t ? `<div class="${ok ? 'okmsg' : 'err'}">${esc(t)}</div>` : ''; };
@@ -2689,9 +2691,16 @@ async function warBattle(id) {
     if (weapons.length > 6) { m('أقصى 6 أصناف أسلحة في المعركة الواحدة'); return; }
     m('جارٍ شن المعركة…', true);
     try {
-      const r = await api('POST', '/war/battle', { war_id: id, units, weapons });
+      const r = await api('POST', '/war/battle', { war_id: id, units, weapons, strategy: document.getElementById('wbstrat').value, direction: document.getElementById('wbdir').value || null, target_city: document.getElementById('wbcity').value || null });
       const wu = (r.weapons_used || []).map((x) => `${x.name} ×${x.qty}`).join('، ');
-      alert(`انتهت المعركة — المنتصر: ${r.winner_name}\nخسائر المهاجم ${fmtPop(r.att_losses)} · خسائر المدافع ${fmtPop(r.def_losses)}${wu ? '\nالأسلحة المستخدمة: ' + wu : ''}\nالنقاط: ${r.score_a} : ${r.score_b}`);
+      const stratName = (STRATEGIES[r.strategy] || {}).name || '';
+      let msg = `انتهت المعركة — المنتصر: ${r.winner_name}${stratName ? ' (' + stratName + ')' : ''}\nخسائر المهاجم ${fmtPop(r.att_losses)} · خسائر المدافع ${fmtPop(r.def_losses)}`;
+      if (r.att_hp != null) msg += `\nنقاط الصحة: ${r.att_hp}/${r.att_max_hp} ضد ${r.def_hp}/${r.def_max_hp}`;
+      if (r.city_damage_pct) msg += `\n🏙️ دمار ${esc(r.target_city || '')}: ${r.city_damage_pct}% · قتلى مدنيون ${fmtPop(r.city_casualties)}`;
+      if (wu) msg += '\nالأسلحة المستخدمة: ' + wu;
+      if (r.colonized) msg += `\n👑 استُعمِرت ${r.colonized.colony_name}!`;
+      msg += `\nالنقاط: ${r.score_a} : ${r.score_b}`;
+      alert(msg);
       close(); vWars();
     } catch (e) { m(e.message, false); }
   };
@@ -2706,17 +2715,61 @@ async function warPeace(id) {
     vWars();
   } catch (e) { alert(e.message); }
 }
-async function warColonize(id) {
-  if (!confirm('استعمار المهزوم؟ ستحصل على غنيمة فورية وجزية شهرية 25% من جبايته — وستفقد حقه في إعلان الحروب (إلا حرب استقلال ضدك).')) return;
-  try {
-    const r = await api('POST', '/war/colonize', { war_id: id });
-    alert(`👑 تم الاستعمار! غنيمة فورية ${fmtRate(r.loot)} مليون $ + جزية شهرية ${r.tribute_pct}% من ${r.colony_name || 'المستعمَرة'}`);
-    vWars();
-  } catch (e) { alert(e.message); }
-}
 async function colonyRelease(code) {
   if (!confirm('تحرير هذه المستعمَرة ومنحها الاستقلال؟')) return;
   try { await api('POST', '/colonies/' + code + '/release'); alert('تم التحرير 🕊️'); vWars(); }
+  catch (e) { alert(e.message); }
+}
+
+// ---------- مختبر الأسلحة ----------
+const WORKSHOP_CLASSES = ['بنادق', 'رشاشات', 'مدفعية ميدانية', 'مدفعية ثقيلة', 'مدفعية حصار', 'هاونات', 'سفن حربية', 'طيران'];
+async function vWorkshop() {
+  if (!me) { location.hash = '#/login'; return; }
+  const myCC = me.country_code;
+  if (!myCC) { app.innerHTML = thead('مختبر الأسلحة') + '<div class="empty">اختراع الأسلحة لأصحاب الدول فقط.</div>'; return; }
+  let mine = [];
+  try {
+    const d = await api('GET', '/armies/' + myCC);
+    mine = (d.weapons || []).filter((w) => w.confidence === 'custom');
+  } catch (e) { /* فارغ */ }
+  app.innerHTML = thead('مختبر الأسلحة')
+    + `<div class="war-sec workshop-hero"><div class="war-sec-t">${ICONS.zap} ابتكر سلاحًا جديدًا</div>
+      <p class="hint">سمِّ سلاحك، اختر صنفه وكميته — يُضاف فورًا لترسانة ${esc(countryOf(myCC).name)} ويظهر في خيارات المعارك. القوة النارية حسب الصنف.</p>
+      <div class="field"><label>اسم السلاح</label><input id="wsc-name" maxlength="80" placeholder="مثال: مدفع الرعد 75 ملم"></div>
+      <div class="field"><label>الصنف (يحدد قوة النيران)</label>
+        <select id="wsc-class">${WORKSHOP_CLASSES.map((c) => `<option value="${c}">${c} — قوة ${WFP[c] ?? '؟'}</option>`).join('')}</select></div>
+      <div class="field"><label>الكمية (1–10000)</label><input id="wsc-qty" type="number" min="1" max="10000" value="100" dir="ltr"></div>
+      <div class="field"><label>ملاحظة (اختياري)</label><input id="wsc-note" maxlength="300" placeholder="وصف مختصر للسلاح"></div>
+      <div class="me-btns"><button class="btn sm" onclick="workshopInvent()">🧪 ابتكار وإضافة للترسانة</button></div>
+      <div id="wsc-msg" style="margin-top:8px"></div>
+    </div>
+    <div class="war-sec"><div class="war-sec-t">أسلحتك المبتكرة (${mine.length})</div>
+      ${mine.length ? '<div class="wpn-grid">' + mine.map((w) => `<div class="wpn-card"><div class="wpn-tx">
+        <b>🧪 ${esc(w.name)}</b><span class="conf-badge conf-custom">ابتكارك</span>
+        <span class="hint">${esc(w.class || '')} · قوة النيران ${WFP[w.class] ?? '؟'} · الكمية ${w.quantity ?? '—'}</span>
+        ${w.note ? `<span class="hint">${esc(w.note)}</span>` : ''}
+        <span class="me-btns"><button class="btn ghost sm" onclick="workshopDelete(${w.id})">حذف</button></span>
+      </div></div>`).join('') + '</div>' : '<div class="empty">لم تبتكر أسلحة بعد — مختبرك بانتظار أول اختراع.</div>'}
+    </div>`;
+}
+async function workshopInvent() {
+  const msg = (t, ok) => { const el = document.getElementById('wsc-msg'); if (el) el.innerHTML = t ? `<div class="${ok ? 'okmsg' : 'err'}">${esc(t)}</div>` : ''; };
+  const name = document.getElementById('wsc-name').value.trim();
+  const cls = document.getElementById('wsc-class').value;
+  const qty = parseInt(document.getElementById('wsc-qty').value, 10);
+  const note = document.getElementById('wsc-note').value.trim();
+  if (!name) { msg('اكتب اسم السلاح أولًا', false); return; }
+  if (!(qty >= 1 && qty <= 10000)) { msg('الكمية يجب أن تكون بين 1 و10000', false); return; }
+  msg('جارٍ الابتكار…', true);
+  try {
+    const r = await api('POST', '/weapons/custom', { name, class: cls, qty, note });
+    msg(`تم! "${name}" انضم لترسانتك بقوة نيران ${r.firepower} للقطعة.`, true);
+    setTimeout(vWorkshop, 900);
+  } catch (e) { msg(e.message, false); }
+}
+async function workshopDelete(id) {
+  if (!confirm('حذف هذا السلاح المبتكر نهائيًا من ترسانتك؟')) return;
+  try { await api('DELETE', '/weapons/custom/' + id); vWorkshop(); }
   catch (e) { alert(e.message); }
 }
 
@@ -3169,7 +3222,7 @@ async function advMeet() {
 function navKey(h) {
   if (h === '#/' || h === '') return '#/';
   if (h.startsWith('#/cat/')) return '#/cat/' + h.split('/')[2];
-  if (h === '#/dispatches' || h === '#/dossiers' || h === '#/news' || h === '#/wars' || h === '#/diplomacy' || h === '#/intel' || h === '#/audit' || h === '#/economy' || h === '#/market' || h === '#/notifications' || h === '#/dash' || h === '#/login' || h === '#/messages' || h === '#/advisor' || h === '#/cabinet') return h;
+  if (h === '#/dispatches' || h === '#/dossiers' || h === '#/news' || h === '#/wars' || h === '#/workshop' || h === '#/diplomacy' || h === '#/intel' || h === '#/audit' || h === '#/economy' || h === '#/market' || h === '#/notifications' || h === '#/dash' || h === '#/login' || h === '#/messages' || h === '#/advisor' || h === '#/cabinet') return h;
   if (h.startsWith('#/economy/')) return '#/economy';
   if (h.startsWith('#/messages/')) return '#/messages';
   if (h.startsWith('#/d/')) return '#/dispatches';
@@ -3191,6 +3244,7 @@ async function route() {
     else if (h === '#/dossiers') await vDossiers();
     else if (h === '#/news') await vNews();
     else if (h === '#/wars') await vWars();
+    else if (h === '#/workshop') await vWorkshop();
     else if (h === '#/diplomacy') await vDiplomacy();
     else if (h === '#/intel') await vIntel();
     else if (h === '#/advisor') await vAdvisor();

@@ -768,3 +768,26 @@ body.nav-open .nav-scrim{opacity:1;pointer-events:auto}
 .emb-av{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:28px;background:#1a2233;flex:none}
 /* إصلاح إتاحة أزرار رفع الصور: display:none تُسقط المدخل من شجرة الوصول — إخفاء بصري فقط */
 input[type="file"].a11y-hidden{position:absolute!important;width:1px;height:1px;margin:0;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;opacity:0}
+
+/* ===== نظام HP والاستعمار الجديد ===== */
+.hp-wrap{display:inline-flex;align-items:center;gap:6px;vertical-align:middle}
+.hp-bar{display:inline-block;width:90px;max-width:30vw;height:8px;border-radius:99px;background:#232a38;overflow:hidden;direction:ltr}
+.hp-bar i{display:block;height:100%;border-radius:99px;transition:width .4s}
+.hp-num{font-size:.72rem;color:#9fb0c8;font-variant-numeric:tabular-nums}
+/* مسرح الاستعمار — داكن بلهجة حمراء */
+.colony-theater{background:linear-gradient(160deg,#16090d 0%,#1d0d12 60%,#12060a 100%)!important;border:1px solid #5a1620!important;border-radius:14px;box-shadow:inset 0 0 60px rgba(180,20,30,.08)}
+.colony-title{color:#ff6b74!important}
+.colony-theater .empty{color:#b98a90}
+.colony-routes{display:flex;flex-direction:column;gap:8px}
+.colony-route{display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.03);border:1px solid #4a1219;border-radius:10px;padding:10px 12px;flex-wrap:wrap}
+.cr-over{font-weight:800;color:#ffd7da}
+.cr-col{font-weight:800;color:#ff8f96}
+.cr-line{flex:1;min-width:40px;height:2px;background:repeating-linear-gradient(90deg,#8e1e2f 0 8px,transparent 8px 14px);border-radius:2px;position:relative}
+.cr-line::after{content:'◀';color:#f4212e;position:absolute;left:-2px;top:-11px;font-size:14px}
+/* مختبر الأسلحة */
+.workshop-hero{border:1px dashed #3a6ea5;border-radius:14px;background:linear-gradient(160deg,rgba(29,155,240,.06),transparent)}
+.conf-custom{color:#7fd0ff;border-color:#3a6ea5}
+@media (max-width:520px){
+  .hp-bar{width:64px}
+  .cr-line{min-width:24px}
+}

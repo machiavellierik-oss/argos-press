@@ -702,6 +702,25 @@ app.post('/api/admin/wipe-companies', ah(auth), requireDeveloper, ah(async (req,
   const r = await q('DELETE FROM companies');
   res.json({ ok: true, deleted: r.rowCount });
 }));
+// إنهاء كل الحروب النشطة دفعة واحدة — وقف إطلاق نار شامل بلا تعويضات (للمطورين فقط)
+app.post('/api/admin/end-all-wars', ah(auth), requireDeveloper, ah(async (req, res) => {
+  const wars = await all("SELECT * FROM wars WHERE status='active'");
+  const g = await gameNow();
+  let ended = 0;
+  for (const w of wars) {
+    try {
+      await q(`UPDATE wars SET status='ended', ended_game_time=$1, proposed_by=NULL WHERE id=$2`, [g, w.id]);
+      await setMapWarStatus(w.attacker_code, false);
+      await setMapWarStatus(w.defender_code, false);
+      await freeColonyIfPair(w.attacker_code, w.defender_code);
+      await emitEvent('war_ended', w.attacker_code, w.defender_code,
+        `🕊️ وقف شامل لإطلاق النار — انتهت الحرب بين ${cname(w.attacker_code)} و${cname(w.defender_code)} بقرار الإدارة`, { war_id: w.id });
+      ended++;
+    } catch (e) { /* */ }
+  }
+  await audit('admin_end_all_wars', req.user.username, `إنهاء ${ended} حرب نشطة بقرار إداري`);
+  res.json({ ok: true, ended });
+}));
 
 // ---------- خريطة غرفة الحرب: تعديلات المطورين (لون/حالة/حدود) ----------
 // عام للقراءة — يغذي ألوان الكرة وإعلانات الحرب/الطوارئ
@@ -837,6 +856,8 @@ async function seedArmies() {
 
 // ---------- نظام الحرب (المرحلة 2) ----------
 // الحرب = إعلان → معارك بقوة محسوبة (ليست عدد البنادق فقط) → نقاط حرب → سلام/تعويضات
+// نقاط الصحة HP: أساس 1000 لكل دولة، يتطور مع قوة الجيش والتدريب والاقتصاد حتى 10000 كحد أقصى.
+// الدولة التي تصل نقاط صحتها إلى صفر تُستعمر تلقائيًا من خصمها في الحرب.
 async function seedWar() {
   for (const colDef of ['readiness INTEGER DEFAULT 70', 'morale INTEGER DEFAULT 70', 'training INTEGER DEFAULT 60']) {
     try { await q(`ALTER TABLE armies ADD COLUMN ${colDef}`); } catch (e) { /* موجود */ }
@@ -844,6 +865,15 @@ async function seedWar() {
   await q('UPDATE armies SET readiness=70 WHERE readiness IS NULL');
   await q('UPDATE armies SET morale=70 WHERE morale IS NULL');
   await q('UPDATE armies SET training=60 WHERE training IS NULL');
+  await q(`CREATE TABLE IF NOT EXISTS nation_hp (
+    country_code TEXT PRIMARY KEY, hp DOUBLE PRECISION NOT NULL, max_hp DOUBLE PRECISION NOT NULL,
+    updated_at BIGINT NOT NULL
+  )`);
+  await q(`CREATE TABLE IF NOT EXISTS city_hp (
+    country_code TEXT NOT NULL, city TEXT NOT NULL, hp DOUBLE PRECISION NOT NULL,
+    max_hp DOUBLE PRECISION NOT NULL, damage_pct DOUBLE PRECISION NOT NULL DEFAULT 0,
+    updated_at BIGINT NOT NULL, PRIMARY KEY (country_code, city)
+  )`);
   await q(`CREATE TABLE IF NOT EXISTS wars (
     id SERIAL PRIMARY KEY, attacker_code TEXT NOT NULL, defender_code TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'active',
@@ -858,8 +888,15 @@ async function seedWar() {
     att_power DOUBLE PRECISION NOT NULL, def_power DOUBLE PRECISION NOT NULL,
     att_losses INTEGER NOT NULL, def_losses INTEGER NOT NULL,
     winner TEXT NOT NULL, region TEXT DEFAULT '',
-    game_time BIGINT NOT NULL, created_at BIGINT NOT NULL
+    game_time BIGINT NOT NULL, created_at BIGINT NOT NULL,
+    strategy TEXT, target_city TEXT, direction TEXT,
+    city_damage_pct DOUBLE PRECISION DEFAULT 0, city_casualties INTEGER DEFAULT 0
   )`);
+  // ترحيل لقواعد البيانات القديمة التي أُنشئت قبل إضافة أعمدة HP/المدن
+  for (const colDef of ['strategy TEXT', 'target_city TEXT', 'direction TEXT',
+                        'city_damage_pct DOUBLE PRECISION DEFAULT 0', 'city_casualties INTEGER DEFAULT 0']) {
+    try { await q(`ALTER TABLE battles ADD COLUMN ${colDef}`); } catch (e) { /* موجود */ }
+  }
   await q(`CREATE TABLE IF NOT EXISTS battle_weapons (
     id SERIAL PRIMARY KEY, battle_id INTEGER NOT NULL,
     weapon_id INTEGER, weapon_name TEXT, class TEXT,
@@ -970,6 +1007,83 @@ function battlePower(units, mil) {
   const r = mil.readiness / 100, t = mil.training / 100, m = mil.morale / 100;
   const rand = 0.90 + Math.random() * 0.20; // حظ محدود 0.90–1.10
   return units * (0.4 + 0.6 * r) * (0.5 + 0.5 * t) * (0.5 + 0.5 * m) * rand;
+}
+// ---------- نقاط الصحة HP ----------
+// الأساس 1000؛ مكافأة الجيش حتى +4000، التدريب حتى +3000، الاقتصاد حتى +2000 — السقف 10000
+async function computeMaxHP(cc) {
+  const mil = await getArmy(cc);
+  const armyBonus = Math.min(4000, Math.max(0, Number(mil.soldiers) || 0) / 25);
+  const trainBonus = Math.max(0, Math.min(100, Number(mil.training) || 0)) * 30;
+  let econBonus = 0;
+  try {
+    const er = await one('SELECT gdp_m_intl FROM country_economy WHERE country_code=$1', [cc]);
+    const gdp = Number(er && er.gdp_m_intl) || 0;
+    if (gdp > 0) econBonus = Math.max(0, Math.min(2000, (Math.log10(gdp) - 2) * 500));
+  } catch (e) { /* بلا اقتصاد مسجل */ }
+  return Math.round(Math.min(10000, 1000 + armyBonus + trainBonus + econBonus));
+}
+// يضمن وجود صف للدولة (يُنشأ بكامل الصحة) ويُرجع {hp, max_hp}
+async function ensureNationHP(cc) {
+  let r = await one('SELECT hp, max_hp FROM nation_hp WHERE country_code=$1', [cc]);
+  if (!r) {
+    const mx = await computeMaxHP(cc);
+    await q('INSERT INTO nation_hp (country_code,hp,max_hp,updated_at) VALUES ($1,$2,$3,$4)', [cc, mx, mx, Date.now()]);
+    return { hp: mx, max_hp: mx };
+  }
+  return { hp: Number(r.hp), max_hp: Number(r.max_hp) };
+}
+async function getHP(cc) { return ensureNationHP(cc); }
+// إلحاق ضرر بنقاط الصحة — يُرجع القيمة الجديدة (يُثبَّت عند الصفر)
+async function damageHP(cc, amount) {
+  const cur = await ensureNationHP(cc);
+  const nv = Math.max(0, cur.hp - Math.max(0, Math.round(amount)));
+  await q('UPDATE nation_hp SET hp=$1, updated_at=$2 WHERE country_code=$3', [nv, Date.now(), cc]);
+  return { hp: nv, max_hp: cur.max_hp };
+}
+// إعادة حساب شهرية: تحديث السقف + تثبيت الصحة ضمنه + تعافٍ تدريجي 3% + ترميم المدن 5%
+async function refreshNationHP(cc) {
+  const mx = await computeMaxHP(cc);
+  const cur = await ensureNationHP(cc);
+  const healed = Math.min(mx, cur.hp + Math.round(mx * 0.03));
+  await q('UPDATE nation_hp SET max_hp=$1, hp=$2, updated_at=$3 WHERE country_code=$4', [mx, healed, Date.now(), cc]);
+  await q(`UPDATE city_hp SET damage_pct=GREATEST(0, damage_pct - 5),
+           hp=LEAST(max_hp, hp + max_hp * 0.05), updated_at=$1 WHERE country_code=$2`, [Date.now(), cc]);
+  return { hp: healed, max_hp: mx };
+}
+// صحة المدينة: العاصمة 1000، الكبرى 600، البقية 300 — تُشتق من ترتيبها في ملف المدن
+function cityMaxHP(cc, city) {
+  const list = (typeof GEO_CITIES !== 'undefined' && GEO_CITIES && GEO_CITIES[cc]) || [];
+  const idx = list.indexOf(city);
+  if (idx === 0) return 1000;
+  if (idx >= 1 && idx <= 3) return 600;
+  return 300;
+}
+async function ensureCityHP(cc, city) {
+  let r = await one('SELECT hp, max_hp, damage_pct FROM city_hp WHERE country_code=$1 AND city=$2', [cc, city]);
+  if (!r) {
+    const mx = cityMaxHP(cc, city);
+    await q('INSERT INTO city_hp (country_code,city,hp,max_hp,damage_pct,updated_at) VALUES ($1,$2,$3,$4,0,$5)',
+      [cc, city, mx, mx, Date.now()]);
+    return { hp: mx, max_hp: mx, damage_pct: 0 };
+  }
+  return { hp: Number(r.hp), max_hp: Number(r.max_hp), damage_pct: Number(r.damage_pct) || 0 };
+}
+// ضرر مدينة: يُرجع {damage_pct الجديد، القتلى المدنيون}
+async function damageCity(cc, city, points) {
+  const cur = await ensureCityHP(cc, city);
+  const pts = Math.max(0, Math.round(points));
+  const nhp = Math.max(0, cur.hp - pts);
+  const ndmg = Math.min(100, Math.round(((cur.max_hp - nhp) / cur.max_hp) * 100));
+  await q('UPDATE city_hp SET hp=$1, damage_pct=$2, updated_at=$3 WHERE country_code=$4 AND city=$5',
+    [nhp, ndmg, Date.now(), cc, city]);
+  const casualties = Math.round(pts * 10); // كل نقطة ضرر ≈ 10 قتلى مدنيين
+  try { await q('UPDATE country_economy SET population=GREATEST(0, population - ($1::BIGINT)) WHERE country_code=$2 AND population IS NOT NULL', [casualties, cc]); } catch (e) { /* */ }
+  return { damage_pct: ndmg, casualties, hp: nhp, max_hp: cur.max_hp };
+}
+async function getCityDamage(cc, city) {
+  if (!city) return 0;
+  const r = await one('SELECT damage_pct FROM city_hp WHERE country_code=$1 AND city=$2', [cc, city]).catch(() => null);
+  return r ? Number(r.damage_pct) || 0 : 0;
 }
 async function setArmyStat(cc, patch) {
   const sets = [], vals = [];
@@ -1158,43 +1272,51 @@ async function freeColonyIfPair(a, b) {
     WHERE (colony_code=$1 AND overlord_code=$2) OR (colony_code=$2 AND overlord_code=$1)`, [a, b]);
   return r.rowCount > 0;
 }
-// الاستعمار — المنتصر بفرق 50+ نقطة يستعمر المهزوم بدل التعويضات فقط
-async function colonizeInternal(warId, meCC, actorUsername, force) {
+// الاستعمار — النظام الجديد: الدولة التي تصل نقاط صحتها (HP) إلى صفر تُستعمر
+// تلقائيًا من خصمها في الحرب — بلا شرط فرق نقاط. غنيمة فورية 15% من السيولة + جزية شهرية 25%.
+async function colonizeByHP(warId, winnerCC, loserCC, actorUsername, force) {
   const w = await one('SELECT * FROM wars WHERE id=$1', [parseInt(warId, 10) || 0]);
   if (!w || w.status !== 'active') throw { status: 404, message: 'لا توجد حرب نشطة بهذا الرقم' };
-  if (meCC !== w.attacker_code && meCC !== w.defender_code)
-    throw { status: 403, message: 'غير مصرح — لست طرفًا في هذه الحرب' };
-  const meSide = meCC === w.attacker_code ? w.attacker_code : w.defender_code;
-  const otherSide = meSide === w.attacker_code ? w.defender_code : w.attacker_code;
-  const myDiff = meSide === w.attacker_code ? Number(w.score_a) - Number(w.score_b) : Number(w.score_b) - Number(w.score_a);
-  if (!force && myDiff < 50) throw { status: 400, message: 'الاستعمار يتطلب تفوقًا ساحقًا (فرق 50+ نقطة لصالحك)' };
-  if (await getColony(meSide)) throw { status: 400, message: 'دولة مستعمَرة لا تستعمر غيرها' };
-  if (await getColony(otherSide)) throw { status: 400, message: 'لا يمكن استعمار دولة مستعمَرة أصلًا' };
-  // غنيمة فورية — نفس معادلة التعويضات
+  if (!force) {
+    const lh = await getHP(loserCC);
+    if (lh.hp > 0) throw { status: 400, message: 'الاستعمار يتم تلقائيًا عند نفاد نقاط صحة العدو (HP = 0)' };
+  }
+  if (await getColony(loserCC)) throw { status: 400, message: 'لا يمكن استعمار دولة مستعمَرة أصلًا' };
+  if (await getColony(winnerCC)) throw { status: 400, message: 'دولة مستعمَرة لا تستعمر غيرها' };
+  // غنيمة فورية: 15% من سيولة المهزوم
   const g = await gameNow();
-  const want = Math.round(Math.abs(myDiff) * 5);
-  const le = await one('SELECT liquidity_m_usd FROM country_economy WHERE country_code=$1', [otherSide]);
-  const loot = Math.max(0, Math.min(Math.floor(Number(le && le.liquidity_m_usd) || 0), want));
+  const le = await one('SELECT liquidity_m_usd FROM country_economy WHERE country_code=$1', [loserCC]);
+  const loot = Math.max(0, Math.floor((Number(le && le.liquidity_m_usd) || 0) * 0.15));
   if (loot > 0) {
-    await deductLiquidity(otherSide, loot);
-    await addLiquidity(meSide, loot);
-    await logLiq(otherSide, -loot, `غنائم استعمار لصالح ${cname(meSide)}`, actorUsername);
-    await logLiq(meSide, loot, `غنائم استعمار من ${cname(otherSide)}`, actorUsername);
+    await deductLiquidity(loserCC, loot);
+    await addLiquidity(winnerCC, loot);
+    await logLiq(loserCC, -loot, `غنائم استعمار لصالح ${cname(winnerCC)}`, actorUsername);
+    await logLiq(winnerCC, loot, `غنائم استعمار من ${cname(loserCC)}`, actorUsername);
   }
   await q('UPDATE wars SET status=$1, ended_game_time=$2, proposed_by=NULL WHERE id=$3', ['ended', g, w.id]);
   await setMapWarStatus(w.attacker_code, false);
   await setMapWarStatus(w.defender_code, false);
-  await freeColonyIfPair(meSide, otherSide); // كانت حرب استقلال؟ انتهت — ثم يبدأ عهد جديد
+  await freeColonyIfPair(winnerCC, loserCC); // كانت حرب استقلال؟ انتهت — ثم يبدأ عهد جديد
   await q(`INSERT INTO colonies (colony_code,overlord_code,tribute_pct,started_game_time,created_at)
-           VALUES ($1,$2,25,$3,$4)`, [otherSide, meSide, g, Date.now()]);
-  await emitEvent('colonized', meSide, otherSide,
-    `👑 ${cname(meSide)} تستعمر ${cname(otherSide)} — جزية شهرية 25% من الجباية`, { war_id: w.id });
-  await audit('war_colonize', actorUsername, `${meSide} استعمرت ${otherSide} (فرق ${Math.round(myDiff)} نقطة، غنيمة ${loot} مليون $)`);
-  await notifyCountry(otherSide, 'colony', `تم استعمار دولتك!`,
-    `${cname(meSide)} استعمرت دولتك. ستدفع جزية شهرية 25% من جبايتك، ولا تعلن الحرب إلا حرب استقلال ضد مستعمِرك.`, '#/wars');
-  await notifyCountry(meSide, 'colony', `مستعمَرة جديدة: ${cname(otherSide)} 👑`,
-    `أصبحت ${cname(otherSide)} مستعمَرة لك — جزية شهرية 25% من جبايتها تصلك تلقائيًا.`, '#/wars');
-  return { colonized: true, colony: otherSide, overlord: meSide, loot, tribute_pct: 25 };
+           VALUES ($1,$2,25,$3,$4)`, [loserCC, winnerCC, g, Date.now()]);
+  await emitEvent('colonized', winnerCC, loserCC,
+    `👑 ${cname(winnerCC)} تستعمر ${cname(loserCC)} — نُفدت نقاط صحتها — جزية شهرية 25% من الجباية`, { war_id: w.id });
+  await audit('war_colonize', actorUsername, `${winnerCC} استعمرت ${loserCC} (نفاد HP، غنيمة ${loot} مليون $)`);
+  await notifyCountry(loserCC, 'colony', `تم استعمار دولتك!`,
+    `${cname(winnerCC)} استعمرت دولتك بعد نفاد نقاط صحتك. ستدفع جزية شهرية 25% من جبايتك، ولا تعلن الحرب إلا حرب استقلال ضد مستعمِرك.`, '#/wars');
+  await notifyCountry(winnerCC, 'colony', `مستعمَرة جديدة: ${cname(loserCC)} 👑`,
+    `نُفدت نقاط صحة ${cname(loserCC)} فأصبحت مستعمَرة لك — جزية شهرية 25% من جبايتها تصلك تلقائيًا.`, '#/wars');
+  return { colonized: true, colony: loserCC, overlord: winnerCC, loot, tribute_pct: 25 };
+}
+// فحص ما بعد المعركة: من نُفدت صحته يُستعمر فورًا من خصمه
+async function maybeColonizeOnZeroHP(warId, loserCC, winnerCC, actorUsername) {
+  try {
+    const lh = await getHP(loserCC);
+    if (lh.hp > 0) return null;
+    if (await getColony(loserCC)) return null;
+    if (await getColony(winnerCC)) return null;
+    return await colonizeByHP(warId, winnerCC, loserCC, actorUsername, false);
+  } catch (e) { return null; }
 }
 async function getTreatyPolicy(cc, type) {
   const r = await one('SELECT policy FROM treaty_autopolicy WHERE country_code=$1 AND treaty_type=$2', [cc, type])
@@ -1236,13 +1358,24 @@ async function breakTreaty(t, byCC, reason, req) {
 // قائمة الحروب (عامة)
 app.get('/api/wars', ah(async (req, res) => {
   const rows = await all(`SELECT * FROM wars ORDER BY CASE WHEN status='active' THEN 0 ELSE 1 END, id DESC LIMIT 30`);
-  res.json({ wars: rows.map((w) => ({
-    id: w.id, attacker_code: w.attacker_code, defender_code: w.defender_code,
-    attacker_name: cname(w.attacker_code), defender_name: cname(w.defender_code),
-    status: w.status, score_a: Math.round(Number(w.score_a) * 10) / 10, score_b: Math.round(Number(w.score_b) * 10) / 10,
-    proposed_by: w.proposed_by, started_game_time: Number(w.started_game_time),
-    ended_game_time: w.ended_game_time != null ? Number(w.ended_game_time) : null,
-  })) });
+  const wars = [];
+  for (const w of rows) {
+    const attHP = await getHP(w.attacker_code).catch(() => ({ hp: 1000, max_hp: 1000 }));
+    const defHP = await getHP(w.defender_code).catch(() => ({ hp: 1000, max_hp: 1000 }));
+    const attLL = LATLON[w.attacker_code] || [], defLL = LATLON[w.defender_code] || [];
+    wars.push({
+      id: w.id, attacker_code: w.attacker_code, defender_code: w.defender_code,
+      attacker_name: cname(w.attacker_code), defender_name: cname(w.defender_code),
+      status: w.status, score_a: Math.round(Number(w.score_a) * 10) / 10, score_b: Math.round(Number(w.score_b) * 10) / 10,
+      proposed_by: w.proposed_by, started_game_time: Number(w.started_game_time),
+      ended_game_time: w.ended_game_time != null ? Number(w.ended_game_time) : null,
+      attacker_hp: { hp: Math.round(attHP.hp), max_hp: Math.round(attHP.max_hp) },
+      defender_hp: { hp: Math.round(defHP.hp), max_hp: Math.round(defHP.max_hp) },
+      attacker_lat: attLL[0] ?? null, attacker_lon: attLL[1] ?? null,
+      defender_lat: defLL[0] ?? null, defender_lon: defLL[1] ?? null,
+    });
+  }
+  res.json({ wars });
 }));
 app.get('/api/wars/:id', ah(async (req, res) => {
   const w = await one('SELECT * FROM wars WHERE id=$1', [req.params.id]);
@@ -1321,6 +1454,8 @@ async function declareWarInternal(attacker, target, actorUsername) {
   const r = await q(`INSERT INTO wars (attacker_code,defender_code,status,started_game_time,created_at)
                      VALUES ($1,$2,'active',$3,$4) RETURNING id`, [attacker, target, g, Date.now()]);
   const warId = r.rows[0].id;
+  await ensureNationHP(attacker);
+  await ensureNationHP(target);
   await setArmyStat(attacker, { readiness: Math.max(0, mil.readiness - 5), morale: Math.max(0, mil.morale - 3) });
   await setEconStat(attacker, 'stability', Math.max(0, await getEconStat(attacker, 'stability', 70) - 3));
   await setEconStat(attacker, 'public_support', Math.max(0, await getEconStat(attacker, 'public_support', 60) - 5));
@@ -1346,22 +1481,43 @@ async function declareWarInternal(attacker, target, actorUsername) {
 }
 // معركة — attackerCC يجب أن يكون الطرف المهاجم في الحرب
 // weaponPick: [{id, qty}] أسلحة المهاجم من ترسانته (اختياري) — المدافع يدعم تلقائيًا من ترسانته
-async function battleInternal(warId, attackerCC, units, region, actorUsername, weaponPick) {
+// استراتيجيات الهجوم: مضاعف القوة / مضاعف خسائر المهاجم / مضاعف ضرر المدن
+const STRATEGIES = {
+  assault:   { name: 'هجوم مباشر', power: 1.0,  loss: 1.0, city: 0.3, desc: 'اشتباك تقليدي متوازن' },
+  blitz:     { name: 'هجوم خاطف',  power: 1.25, loss: 1.3, city: 0.2, desc: 'سرعة وحسم — خسائر أعلى' },
+  siege:     { name: 'حصار',       power: 0.9,  loss: 0.7, city: 1.2, desc: 'خنق بطيء يدمر المدينة' },
+  artillery: { name: 'قصف مدفعي',  power: 1.1,  loss: 0.8, city: 1.8, desc: 'تدمير مركز للمدن والتحصينات' },
+  naval:     { name: 'قصف بحري',    power: 1.05, loss: 0.6, city: 2.0, desc: 'بوارج تدك الساحل — دمار مدني هائل' },
+  guerrilla: { name: 'حرب عصابات',  power: 0.8,  loss: 0.5, city: 0.1, desc: 'كمائن واستنزاف بخسائر قليلة' },
+};
+async function battleInternal(warId, attackerCC, units, region, actorUsername, weaponPick, opts) {
   const w = await one('SELECT * FROM wars WHERE id=$1', [parseInt(warId, 10) || 0]);
   if (!w || w.status !== 'active') throw { status: 404, message: 'لا توجد حرب نشطة بهذا الرقم' };
-  if (w.attacker_code !== attackerCC) throw { status: 403, message: 'غير مصرح — المبادرة بالمعارك للطرف المهاجم' };
-  const attMil = await getArmy(w.attacker_code);
-  const defMil = await getArmy(w.defender_code);
+  const isReversed = w.defender_code === attackerCC;
+  if (w.attacker_code !== attackerCC && !isReversed) throw { status: 403, message: 'غير مصرح — لست طرفًا في هذه الحرب' };
+  // مهاجم/مدافع المعركة الفعليان: المدافع الأصلي يستطيع شن هجوم مضاد
+  const bAtt = isReversed ? w.defender_code : w.attacker_code;
+  const bDef = isReversed ? w.attacker_code : w.defender_code;
+  const attMil = await getArmy(bAtt);
+  const defMil = await getArmy(bDef);
   units = parseInt(units, 10) || 0;
   const maxUnits = Math.floor(attMil.soldiers * 0.5);
   if (!(units >= 1000)) throw { status: 400, message: 'أقل قوة هجوم لمعركة: 1000 جندي' };
   if (units > maxUnits) throw { status: 400, message: `أقصى قوة لمعركة واحدة: ${maxUnits.toLocaleString('en-US')} جندي (50% من الجيش)` };
   region = String(region || '').slice(0, 60);
+  // خيارات المعركة: الاستراتيجية + المدينة المستهدفة + اتجاه الهجوم
+  const o = opts || {};
+  const stratKey = STRATEGIES[o.strategy] ? o.strategy : 'assault';
+  const strat = STRATEGIES[stratKey];
+  const direction = String(o.direction || '').slice(0, 30);
+  let targetCity = String(o.target_city || '').trim().slice(0, 60);
+  const defCities = (typeof GEO_CITIES !== 'undefined' && GEO_CITIES && GEO_CITIES[bDef]) || [];
+  if (targetCity && !defCities.includes(targetCity)) targetCity = '';
   // أسلحة المهاجم (يختارها اللاعب أو الذكاء) — تُضاف قوة نيرانها فوق قوة الجنود
-  const attW = await validateBattleWeapons(w.attacker_code, weaponPick);
+  const attW = await validateBattleWeapons(bAtt, weaponPick);
   const attWPower = attW.reduce((s, x) => s + x.fp * x.qty, 0);
   // دعم المدافع التلقائي: أقوى 5 أصناف في ترسانته (بنصف الفعالية — أسلحة دفاعية مرتجلة)
-  const defWRows = await all('SELECT id, name, class, quantity FROM weapons WHERE country_code=$1', [w.defender_code]);
+  const defWRows = await all('SELECT id, name, class, quantity FROM weapons WHERE country_code=$1', [bDef]);
   const defW = defWRows
     .map((r) => ({ id: Number(r.id), name: r.name, class: r.class, fp: weaponFP(r.class), avail: r.quantity == null ? 40 : Number(r.quantity) || 0, stockNull: r.quantity == null }))
     .filter((x) => x.fp > 0 && x.avail > 0)
@@ -1370,34 +1526,56 @@ async function battleInternal(warId, attackerCC, units, region, actorUsername, w
     .map((x) => ({ ...x, qty: Math.min(x.avail, 150) }));
   const defWPower = defW.reduce((s, x) => s + x.fp * x.qty * 0.5, 0);
   const defUnits = Math.max(500, Math.round(Math.min(defMil.soldiers * 0.6, units * (0.9 + Math.random() * 0.3))));
-  const attP = battlePower(units, attMil) + attWPower;
+  const attP = battlePower(units, attMil) * strat.power + attWPower;
   const defP = battlePower(defUnits, defMil) * 1.1 + defWPower;
   const attWins = attP >= defP;
   const winner = attWins ? 'attacker' : 'defender';
-  const attLoss = Math.round(units * (attWins ? 0.05 + Math.random() * 0.05 : 0.15 + Math.random() * 0.10));
-  const defLoss = Math.round(defUnits * (attWins ? 0.15 + Math.random() * 0.10 : 0.05 + Math.random() * 0.05));
-  await setArmyStat(w.attacker_code, {
+  const attLoss = Math.round(units * (attWins ? 0.05 + Math.random() * 0.05 : 0.15 + Math.random() * 0.10) * strat.loss);
+  const defLoss = Math.round(defUnits * (attWins ? 0.15 + Math.random() * 0.10 : 0.05 + Math.random() * 0.05) * (1 + (strat.power - 1) * 0.8));
+  await setArmyStat(bAtt, {
     soldiers: Math.max(0, attMil.soldiers - attLoss),
     readiness: Math.max(0, attMil.readiness - 8),
     morale: Math.max(0, Math.min(100, attMil.morale + (attWins ? 2 : -5))),
   });
-  await setArmyStat(w.defender_code, {
+  await setArmyStat(bDef, {
     soldiers: Math.max(0, defMil.soldiers - defLoss),
     readiness: Math.max(0, defMil.readiness - 8),
     morale: Math.max(0, Math.min(100, defMil.morale + (attWins ? -5 : 2))),
   });
   const margin = Math.min(20, (Math.abs(attP - defP) / Math.max(attP, defP)) * 30);
   const pts = Math.round((10 + margin) * 10) / 10;
-  const nScoreA = Math.round((Number(w.score_a) + (attWins ? pts : 0)) * 10) / 10;
-  const nScoreB = Math.round((Number(w.score_b) + (attWins ? 0 : pts)) * 10) / 10;
+  const attWarSideIsA = bAtt === w.attacker_code; // هل مهاجم المعركة هو مهاجم الحرب؟
+  const attScoreGain = attWins ? pts : 0, defScoreGain = attWins ? 0 : pts;
+  const nScoreA = Math.round((Number(w.score_a) + (attWarSideIsA ? attScoreGain : defScoreGain)) * 10) / 10;
+  const nScoreB = Math.round((Number(w.score_b) + (attWarSideIsA ? defScoreGain : attScoreGain)) * 10) / 10;
   await q('UPDATE wars SET score_a=$1, score_b=$2 WHERE id=$3', [nScoreA, nScoreB, w.id]);
   const g = await gameNow();
   const br = await q(`INSERT INTO battles (war_id,attacker_code,defender_code,att_units,def_units,
-                      att_power,def_power,att_losses,def_losses,winner,region,game_time,created_at)
-                      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
-    [w.id, w.attacker_code, w.defender_code, units, defUnits, Math.round(attP), Math.round(defP),
-     attLoss, defLoss, winner, region, g, Date.now()]);
+                      att_power,def_power,att_losses,def_losses,winner,region,game_time,created_at,
+                      strategy,target_city,direction)
+                      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
+    [w.id, bAtt, bDef, units, defUnits, Math.round(attP), Math.round(defP),
+     attLoss, defLoss, winner, region, g, Date.now(), stratKey, targetCity || null, direction || null]);
   const battleId = br.rows[0].id;
+  // ضرر نقاط الصحة: المدافع يفقد بنسبة خسائره من جيشه، المهاجم يفقد نصف النسبة
+  const defHP0 = await getHP(bDef), attHP0 = await getHP(bAtt);
+  const defHPdmg = Math.round((defLoss / Math.max(1, defMil.soldiers)) * defHP0.max_hp);
+  const attHPdmg = Math.round((attLoss / Math.max(1, attMil.soldiers)) * attHP0.max_hp * 0.5);
+  const defHP = await damageHP(bDef, defHPdmg);
+  const attHP = await damageHP(bAtt, attHPdmg);
+  // ضرر المدينة المستهدفة: دمار + قتلى مدنيون + خسارة الإنتاج لاحقًا عبر damage_pct
+  let cityTxt = '', cityDmgPct = 0, cityCas = 0;
+  if (targetCity) {
+    const cityPts = Math.round((defLoss * 0.3 + attWPower * 0.02) * strat.city);
+    const cd = await damageCity(bDef, targetCity, cityPts);
+    cityDmgPct = cd.damage_pct; cityCas = cd.casualties;
+    cityTxt = ` — 💥 قصف ${targetCity}: دُمر ${cd.damage_pct}% من المدينة (مصانعها تفقد ${cd.damage_pct}% من إنتاجها) — القتلى المدنيون: ${cd.casualties.toLocaleString('en-US')}`;
+    await q('UPDATE battles SET city_damage_pct=$1, city_casualties=$2 WHERE id=$3', [cd.damage_pct, cd.casualties, battleId]);
+  }
+  // من نُفدت نقاط صحته يُستعمر فورًا
+  let colonized = null;
+  if (defHP.hp <= 0) colonized = await maybeColonizeOnZeroHP(w.id, bDef, bAtt, actorUsername);
+  else if (attHP.hp <= 0) colonized = await maybeColonizeOnZeroHP(w.id, bAtt, bDef, actorUsername);
   // خسائر الأسلحة: المنتصر يفقد 5-10%، المنهزم 20-30% — وتُخصم من المخزون الموثق
   const wLossRate = (win) => win ? 0.05 + Math.random() * 0.05 : 0.20 + Math.random() * 0.10;
   const recordWeapons = async (list, side, won) => {
@@ -1410,19 +1588,25 @@ async function battleInternal(warId, attackerCC, units, region, actorUsername, w
   };
   await recordWeapons(attW, 'attacker', attWins);
   await recordWeapons(defW, 'defender', !attWins);
-  const wname = attWins ? cname(w.attacker_code) : cname(w.defender_code);
+  const wname = attWins ? cname(bAtt) : cname(bDef);
   const wTxt = attW.length ? ` — بالأسلحة: ${attW.map((x) => x.name + ' ×' + x.qty).join('، ')}` : '';
+  const dirTxt = direction ? ` من ${direction}` : '';
   await emitEvent('battle', w.attacker_code, w.defender_code,
-    `معركة: ${wname} تنتصر${region ? ' في ' + region : ''} (خسائر المهاجم ${attLoss.toLocaleString('en-US')} / المدافع ${defLoss.toLocaleString('en-US')})${wTxt}`,
+    `⚔️ ${strat.name}${dirTxt}: ${wname} تنتصر${region ? ' في ' + region : ''} (خسائر المهاجم ${attLoss.toLocaleString('en-US')} / المدافع ${defLoss.toLocaleString('en-US')})${wTxt}${cityTxt} — نقاط الصحة: ${cname(bAtt)} ${Math.round(attHP.hp)}/${Math.round(attHP.max_hp)} · ${cname(bDef)} ${Math.round(defHP.hp)}/${Math.round(defHP.max_hp)}${colonized ? ' — 👑 ' + cname(colonized.overlord) + ' تستعمر ' + cname(colonized.colony) + '!' : ''}`,
     { war_id: w.id, battle_id: battleId });
   await audit('war_battle', actorUsername, `معركة في حرب #${w.id}: ${units} ضد ${defUnits} — الفائز: ${wname}`);
-  await notifyCountry(w.attacker_code, 'battle', attWins ? 'انتصار في المعركة!' : 'هزيمة في المعركة',
+  await notifyCountry(bAtt, 'battle', attWins ? 'انتصار في المعركة!' : 'هزيمة في المعركة',
     `معركة ${region ? 'في ' + region : ''}: خسائرك ${attLoss.toLocaleString('en-US')} — خسائر العدو ${defLoss.toLocaleString('en-US')}. النقاط: ${nScoreA} مقابل ${nScoreB}.`, '#/news');
-  await notifyCountry(w.defender_code, 'battle', attWins ? 'هزيمة في المعركة' : 'انتصار في المعركة!',
+  await notifyCountry(bDef, 'battle', attWins ? 'هزيمة في المعركة' : 'انتصار في المعركة!',
     `معركة ${region ? 'في ' + region : ''}: خسائرك ${defLoss.toLocaleString('en-US')} — خسائر العدو ${attLoss.toLocaleString('en-US')}. النقاط: ${nScoreB} مقابل ${nScoreA}.`, '#/news');
   return {
     battle_id: battleId, winner, winner_name: wname,
     att_losses: attLoss, def_losses: defLoss, score_a: nScoreA, score_b: nScoreB,
+    strategy: stratKey, strategy_name: strat.name, target_city: targetCity || null,
+    city_damage_pct: cityDmgPct, city_casualties: cityCas,
+    att_hp: { hp: Math.round(attHP.hp), max_hp: Math.round(attHP.max_hp) },
+    def_hp: { hp: Math.round(defHP.hp), max_hp: Math.round(defHP.max_hp) },
+    colonized: colonized ? { colony: colonized.colony, overlord: colonized.overlord, loot: colonized.loot } : null,
     weapons_used: attW.map((x) => ({ id: x.id, name: x.name, class: x.class, qty: x.qty })),
   };
 }
@@ -1451,7 +1635,7 @@ async function peaceInternal(warId, meCC, actorUsername, force) {
     await hqArticle(`سلام: انتهاء الحرب بين ${cname(w.attacker_code)} و${cname(w.defender_code)}`,
       `وُقّع السلام رسميًا بين ${cname(w.attacker_code)} و${cname(w.defender_code)}${reparations ? ` مع تعويضات حرب قدرها ${reparations} مليون دولار` : ''}.`, 'wars');
   };
-  if (Math.abs(diff) >= 50 || force) {
+  if (force) { // سلام مفروض — للمطورين فقط (لم يعد هناك سلام تلقائي بفرق النقاط: الحسم بالاستعمار عند نفاد HP)
     const winnerCC = diff >= 0 ? w.attacker_code : w.defender_code;
     const loserCC = diff >= 0 ? w.defender_code : w.attacker_code;
     const want = Math.round(Math.abs(diff) * 5);
@@ -1503,9 +1687,11 @@ app.post('/api/war/battle', ah(auth), ah(async (req, res) => {
   const b = req.body || {};
   const w = await one('SELECT * FROM wars WHERE id=$1', [parseInt(b.war_id, 10) || 0]);
   if (!w || w.status !== 'active') return res.status(404).json({ error: 'لا توجد حرب نشطة بهذا الرقم' });
-  if (!dev && req.user.country_code !== w.attacker_code)
-    return res.status(403).json({ error: 'غير مصرح — المبادرة بالمعارك للطرف المهاجم' });
-  const out = await battleInternal(w.id, w.attacker_code, b.units, b.region, req.user.username, b.weapons);
+  if (!dev && req.user.country_code !== w.attacker_code && req.user.country_code !== w.defender_code)
+    return res.status(403).json({ error: 'غير مصرح — لست طرفًا في هذه الحرب' });
+  const battleCC = dev ? w.attacker_code : req.user.country_code;
+  const out = await battleInternal(w.id, battleCC, b.units, b.region, req.user.username, b.weapons,
+    { strategy: b.strategy, target_city: b.target_city, direction: b.direction });
   res.json(Object.assign({ ok: true }, out));
 }));
 // السلام — تفاوضي بموافقة الطرفين، أو مفروض عند تفوق ساحق (فرق 50+ نقطة) مع تعويضات
@@ -1516,12 +1702,13 @@ app.post('/api/war/peace', ah(auth), ah(async (req, res) => {
   const out = await peaceInternal(b.war_id, req.user.country_code, req.user.username, dev && b.force);
   res.json(Object.assign({ ok: true }, out));
 }));
-// الاستعمار — المنتصر بفرق 50+ نقطة يستعمر المهزوم (جزية شهرية 25%)
-// تحرير طوعي — المستعمِر (أو المطورون) يحرر مستعمَرة | قائمة المستعمرات
+// الاستعمار — تلقائي عند نفاد HP؛ هذا المسار للمطورين فقط (فرض يدوي)
 app.post('/api/war/colonize', ah(auth), ah(async (req, res) => {
   const dev = isDeveloper(req.user);
   const b = req.body || {};
-  const out = await colonizeInternal(b.war_id, req.user.country_code, req.user.username, dev && b.force);
+  if (!dev || !b.force || !b.winner_code || !b.loser_code)
+    return res.status(400).json({ error: 'الاستعمار الآن تلقائي عند نفاد نقاط صحة العدو (HP = 0) — الفرض اليدوي للمطورين فقط' });
+  const out = await colonizeByHP(b.war_id, String(b.winner_code).toUpperCase(), String(b.loser_code).toUpperCase(), req.user.username, true);
   res.json(Object.assign({ ok: true }, out));
 }));
 app.post('/api/colonies/:code/release', ah(auth), ah(async (req, res) => {
@@ -1891,6 +2078,38 @@ app.post('/api/weapons', ah(auth), requireDeveloper, ah(async (req, res) => {
     [w.country_code, w.name, w.class, w.wtype, w.model, w.quantity, w.image_url, w.source_url, w.confidence, w.note, req.user.id, Date.now()]);
   res.json({ ok: true, id: r.rows[0].id });
 }));
+// مختبر الأسلحة — كل لاعب يبتكر سلاحه الخاص ويضيفه لترسانة دولته
+// القوة النارية تُشتق من الصنف (نفس جدول WEAPON_FP) — الكمية بحد أقصى 10000 للابتكار الواحد
+app.post('/api/weapons/custom', ah(auth), ah(async (req, res) => {
+  const cc = req.user.country_code;
+  if (!cc) return res.status(403).json({ error: 'اختراع الأسلحة لأصحاب الدول فقط' });
+  const b = req.body || {};
+  const name = String(b.name || '').trim().slice(0, 80);
+  if (!name) return res.status(400).json({ error: 'اسم السلاح مطلوب' });
+  const cls = String(b.class || '');
+  if (!WEAPON_FP[cls]) return res.status(400).json({ error: 'صنف السلاح غير صالح' });
+  const rawQty = parseInt(b.qty, 10);
+  if (!(rawQty >= 1 && rawQty <= 10000)) return res.status(400).json({ error: 'الكمية مطلوبة (1–10000)' });
+  const qty = rawQty;
+  const note = String(b.note || '').slice(0, 300);
+  const r = await q(`INSERT INTO weapons (country_code,name,class,quantity,confidence,note,created_by,created_at)
+                     VALUES ($1,$2,$3,$4,'custom',$5,$6,$7) RETURNING id`,
+    [cc, name, cls, qty, note, req.user.id, Date.now()]);
+  await audit('weapon_invent', req.user.username, `${cc} ابتكر سلاحًا: ${name} (${cls} ×${qty})`);
+  await emitEvent('weapon_invent', cc, null, `🧪 ${cname(cc)} تكشف عن سلاح جديد من ابتكارها: ${name} (${cls})`, {});
+  res.json({ ok: true, id: r.rows[0].id, firepower: WEAPON_FP[cls] });
+}));
+// حذف سلاح مبتكر — مالكه أو المطورون (الأسلحة الموثقة لا تُحذف من هنا)
+app.delete('/api/weapons/custom/:id', ah(auth), ah(async (req, res) => {
+  const w = await one('SELECT id, country_code, confidence, created_by FROM weapons WHERE id=$1', [req.params.id]);
+  if (!w) return res.status(404).json({ error: 'السلاح غير موجود' });
+  if (w.confidence !== 'custom') return res.status(400).json({ error: 'هذا سلاح موثق تاريخيًا — لا يُحذف من المختبر' });
+  const dev = isDeveloper(req.user);
+  if (!dev && (w.country_code !== req.user.country_code)) return res.status(403).json({ error: 'غير مصرح' });
+  await q('DELETE FROM weapons WHERE id=$1', [req.params.id]);
+  await audit('weapon_invent_del', req.user.username, `حذف سلاح مبتكر #${req.params.id}`);
+  res.json({ ok: true });
+}));
 // تعديل سلاح — المطورون فقط
 app.put('/api/weapons/:id', ah(auth), requireDeveloper, ah(async (req, res) => {
   let w; try { w = cleanWeapon(req.body || {}); } catch (e) { return res.status(400).json({ error: e.message }); }
@@ -2061,6 +2280,7 @@ async function monthlyTickOnce() {
   for (const w of wars) { atWar.add(w.attacker_code); atWar.add(w.defender_code); }
   for (const c of countries) {
     const cc = c.country_code;
+    try { await refreshNationHP(cc); } catch (e) { /* */ } // سقف HP + تعافٍ 3% + ترميم المدن
     const rate = c.tax_rate != null ? Number(c.tax_rate) : 10;
     let stab = await getEconStat(cc, 'stability', 70);
     let ps = await getEconStat(cc, 'public_support', 60);
@@ -2573,12 +2793,21 @@ async function collectCompanyInternal(id, actor) {
     throw Object.assign(new Error('نفد احتياطي ' + RES_AR[row.resource_kind] + ' في ' + cname(row.host_country)), { status: 400 });
   let amount = Math.floor(Math.min(workers * RES_RATE[row.resource_kind], remaining));
   if (amount <= 0) throw Object.assign(new Error('لا يوجد إنتاج متاح هذا الشهر'), { status: 400 });
+  // ضرر الحرب على المدينة: المصانع تفقد من إنتاجها بنسبة دمار مدينتها
+  let cityDmgNote = '';
+  if (row.city) {
+    const cdmg = await getCityDamage(row.host_country, row.city);
+    if (cdmg > 0) {
+      amount = Math.floor(amount * (1 - cdmg / 100));
+      cityDmgNote = ` (خصم ${cdmg}% — دمار الحرب في ${row.city})`;
+    }
+  }
   await addStock(row.host_country, row.resource_kind, amount);
   if (exRow) await q('UPDATE resource_extracted SET extracted = extracted + $3 WHERE country_code=$1 AND resource=$2',
     [row.host_country, row.resource_kind, amount]);
   else await q('INSERT INTO resource_extracted (country_code,resource,extracted) VALUES ($1,$2,$3)',
     [row.host_country, row.resource_kind, amount]);
-  await logLiq(row.host_country, 0, `إنتاج ${RES_AR[row.resource_kind]}: ${amount.toLocaleString('en-US')} ${RES_UNIT[row.resource_kind]} من «${row.name}» (${workers.toLocaleString('en-US')} عامل)`, actor);
+  await logLiq(row.host_country, 0, `إنتاج ${RES_AR[row.resource_kind]}: ${amount.toLocaleString('en-US')} ${RES_UNIT[row.resource_kind]} من «${row.name}» (${workers.toLocaleString('en-US')} عامل)${cityDmgNote}`, actor);
   return { amount, unit: RES_UNIT[row.resource_kind], resource: RES_AR[row.resource_kind],
            stock: await getStock(row.host_country, row.resource_kind), reserve_remaining: remaining - amount };
 }
@@ -4340,12 +4569,11 @@ async function llmGovernTurn(cc, monthIdx) {
     + ' "treaties": [{"type": "non_aggression|trade|alliance|defensive", "to": "CODE"}],\n'
     + ' "spy": {"target": "CODE", "kind": "economy|stability"},\n'
     + ' "declare_war": "CODE أو null",\n'
-    + ' "colonize_war_id": 123,\n'
     + ' "message": {"to": "CODE", "text": "رسالة دبلوماسية"},\n'
     + ' "reason": "سطر واحد: تحليلك للوضع ثم منطق قراراتك"}\n'
     + 'قواعد صارمة: الضريبة المرتفعة تهز الاستقرار. لا تعلن حربًا إلا بتفوق عسكري واضح واستقرار فوق 55. '
-    + 'إن كانت لك حرب بفرق 50+ نقطة لصالحك يمكنك استعمار المهزوم (colonize_war_id برقم الحرب) بدل الاكتفاء بالتعويضات — '
-    + 'غنيمة فورية وجزية شهرية 25% من جبايته. إن كنت مستعمَرة (colony_of) لا تعلن الحرب إلا ضد مستعمِرك (حرب استقلال). '
+    + 'كل دولة لها نقاط صحة (HP من 1000 إلى 10000) — المعارك تُنقصها، ومن تصل صحته إلى صفر يُستعمر تلقائيًا من خصمه '
+    + '(غنيمة فورية 15% من سيولته + جزية شهرية 25% من جبايته). إن كنت مستعمَرة (colony_of) لا تعلن الحرب إلا ضد مستعمِرك (حرب استقلال). '
     + 'الحروب المنطقية فقط: نفس قارتك، أو قوة عظمى (80 ألف+ جندي) داخل إقليمك، أو قوة بحرية عظمى (100 ألف+ جندي ببحرية حربية) عبر البحار — سويسرا محايدة دائمًا فلا تهاجمها أبدًا. '
     + 'لا تقترح معاهدة من نوع سارٍ أصلًا مع نفس الدولة. التجسس مكلف وقد يُكشف فيهبط سمعتك. '
     + 'اقبل/ارفض المعاهدات كبشر: انظر لسمعة المقترح (proposer_reputation)، وهل بينكم حرب (at_war)، وتاريخه معك في الذاكرة — '
@@ -4444,11 +4672,8 @@ async function llmGovernTurn(cc, monthIdx) {
       }
     }
   }
-  // 9) الاستعمار — برقم الحرب، والمحرك يتحقق من فرق 50+ لصالحك
-  if (d.colonize_war_id != null && Number.isFinite(Number(d.colonize_war_id))) {
-    try { await colonizeInternal(Number(d.colonize_war_id), cc, A); notes.push('استعمار'); }
-    catch (err) { /* رفضها المحرك */ }
-  }
+  // 9) نقاط الصحة: إعادة حساب السقف شهريًا + تعافٍ تدريجي + ترميم المدن
+  try { await refreshNationHP(cc); } catch (e) { /* */ }
   // 10) رسالة دبلوماسية استباقية — للاعبين البشر فقط، واحدة شهريًا كحد أقصى
   if (d.message && typeof d.message.to === 'string' && typeof d.message.text === 'string') {
     const toCC = d.message.to.toUpperCase();
@@ -4672,15 +4897,12 @@ async function aiGovern(cc, strategy, actor = AI_ACTOR, domains = null) {
     const gNow = await gameNow();
     let myWars = await all(`SELECT * FROM wars WHERE status='active' AND (attacker_code=$1 OR defender_code=$1)`, [cc]);
     // السلام: تفوق ساحق (فرض بتعويضات)، خسارة فادحة، أو حرب مستنزفة تجاوزت سنة لعبة
+    // (الاستعمار الآن تلقائي عند نفاد HP — لا حاجة لخطوة منفصلة)
     for (const w of myWars) {
       const myDiff = w.attacker_code === cc ? Number(w.score_a) - Number(w.score_b) : Number(w.score_b) - Number(w.score_a);
       const monthsAtWar = (gNow - Number(w.started_game_time || gNow)) / GAME_MONTH_MS;
       if (myDiff >= 50 || myDiff <= -30 || monthsAtWar > 12) {
         try {
-          // التوسعي يستعمر عند التفوق الساحق بدل الاكتفاء بالتعويضات
-          if (myDiff >= 50 && strategy === 'expansionist' && !(await getColony(cc).catch(() => null))) {
-            try { await colonizeInternal(w.id, cc, actor); continue; } catch (e) { /* سقط — سلام عادي */ }
-          }
           await peaceInternal(w.id, cc, actor);
         } catch (e) { /* عرض قائم أو حرب انتهت */ }
       }
@@ -4781,6 +5003,16 @@ async function advisorAutoTick(monthIdx) {
   }
 }
 // ---------------- بدء التشغيل ----------------
+if (process.env.EXPOSE_INTERNALS) {
+  module.exports = {
+    q, one, all, getPool, app,
+    computeMaxHP, ensureNationHP, getHP, damageHP, refreshNationHP,
+    cityMaxHP, ensureCityHP, damageCity, getCityDamage,
+    battleInternal, colonizeByHP, maybeColonizeOnZeroHP,
+    collectCompanyInternal, getArmy, setArmyStat, STRATEGIES, WEAPON_FP,
+    initDb,
+  };
+}
 (async () => {
   await initDb();
   try { await initAiNations(); } catch (e) { console.error('ai_nations:', e.message); }
