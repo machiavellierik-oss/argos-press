@@ -1363,6 +1363,23 @@ async function rewardTreatySigned(t) {
     `معاهدة ناجحة (${TREATY_TYPES[t.type]}) بين ${cname(t.from_code)} و${cname(t.to_code)} — +5 سمعة دبلوماسية لكليهما`);
   return { from: fromRep, to: toRep };
 }
+// احتساب رجعي لمرة واحدة: كل معاهدة تجارية/عدم اعتداء ناشطة حاليًا (وُقعت قبل تفعيل المعادلة)
+// تمنح +5 سمعة دبلوماسية لطرفيها — حتى تُحتسب في التصنيف. (idempotent عبر system_settings)
+async function retroTreatyReputation() {
+  try {
+    const done = await getSetting('treaty_rep_retro_v1').catch(() => null);
+    if (done === '1') return 0;
+    const rows = await all(`SELECT * FROM treaties WHERE status='active' AND type IN ('trade','non_aggression')`);
+    for (const t of rows) {
+      await addReputation(t.from_code, 5);
+      await addReputation(t.to_code, 5);
+    }
+    await setSetting('treaty_rep_retro_v1', '1');
+    if (rows.length) await audit('treaty_reputation', 'النظام',
+      `احتساب رجعي لمعادلة السمعة: +5 سمعة دبلوماسية لطرفي ${rows.length} معاهدة ناشطة (تجارية/عدم اعتداء)`);
+    return rows.length;
+  } catch (e) { return 0; }
+}
 async function activeTreaty(a, b, type) {
   return one(`SELECT * FROM treaties WHERE status='active' AND type=$3 AND
     ((from_code=$1 AND to_code=$2) OR (from_code=$2 AND to_code=$1))`, [a, b, type]);
@@ -1655,7 +1672,7 @@ async function battleInternal(warId, attackerCC, units, region, actorUsername, w
   };
 }
 // سلام — يُرجع {enforced,winner,reparations} أو {negotiated} أو {proposed} — يرمي عند الفشل
-async function peaceInternal(warId, meCC, actorUsername, force) {
+async function peaceInternal(warId, meCC, actorUsername, force, asSurrender = false) {
   const w = await one('SELECT * FROM wars WHERE id=$1', [parseInt(warId, 10) || 0]);
   if (!w || w.status !== 'active') throw { status: 404, message: 'لا توجد حرب نشطة بهذا الرقم' };
   if (meCC !== w.attacker_code && meCC !== w.defender_code) throw { status: 403, message: 'غير مصرح' };
@@ -1700,9 +1717,17 @@ async function peaceInternal(warId, meCC, actorUsername, force) {
   }
   if (w.proposed_by === meSide) throw { status: 400, message: 'عرضك للسلام قائم بانتظار الطرف الآخر' };
   await q('UPDATE wars SET proposed_by=$1 WHERE id=$2', [meSide, w.id]);
-  await emitEvent('peace_proposed', meSide, otherSide, `${cname(meSide)} تعرض السلام على ${cname(otherSide)}`, { war_id: w.id });
-  await notifyCountry(otherSide, 'peace_offer', `${cname(meSide)} تعرض السلام`,
-    `${cname(meSide)} عرضت إنهاء الحرب سلميًا. اقبل من صفحة الحرب.`, '#/news');
+  if (asSurrender) {
+    await emitEvent('surrender_offered', meSide, otherSide,
+      `${cname(meSide)} تطلب الاستسلام من ${cname(otherSide)} 🏳️`, { war_id: w.id });
+    await audit('war_surrender', actorUsername, `${cname(meSide)} تطلب الاستسلام في حرب #${w.id}`);
+    await notifyCountry(otherSide, 'peace_offer', `طلب استسلام من ${cname(meSide)}!`,
+      `${cname(meSide)} تطلب الاستسلام وإنهاء الحرب. اقبل من صفحة الحرب.`, '#/news');
+  } else {
+    await emitEvent('peace_proposed', meSide, otherSide, `${cname(meSide)} تعرض السلام على ${cname(otherSide)}`, { war_id: w.id });
+    await notifyCountry(otherSide, 'peace_offer', `${cname(meSide)} تعرض السلام`,
+      `${cname(meSide)} عرضت إنهاء الحرب سلميًا. اقبل من صفحة الحرب.`, '#/news');
+  }
   // قبول تلقائي لعروض السلام حسب سياسة الطرف الآخر (إن كان بشريًا وضبطها)
   const peacePol = await getTreatyPolicy(otherSide, 'peace_offer').catch(() => 'manual');
   if (peacePol === 'accept') {
@@ -4459,7 +4484,9 @@ async function aiClaimedSet() {
 // ============================================================================
 const LLM_ACTOR = '🧠 الحاكم الذكي';
 async function ensureSettingsTable() {
-  await q(`CREATE TABLE IF NOT EXISTS system_settings (key TEXT PRIMARY KEY, value TEXT, updated_at BIGINT)`);
+  await q(`CREATE TABLE IF NOT EXISTS system_settings (key TEXT, value TEXT, updated_at BIGINT)`);
+  // قيد فريد منفصل بدل PRIMARY KEY المضمن — يعمل على PostgreSQL الحقيقي وpg-mem معًا
+  await q(`CREATE UNIQUE INDEX IF NOT EXISTS system_settings_key_uidx ON system_settings (key)`).catch(() => {});
 }
 async function getSetting(k) {
   await ensureSettingsTable();
@@ -4825,6 +4852,94 @@ async function respondTreaty(t, accept, actor) {
       `${cname(t.to_code)} رفضت: ${TREATY_TYPES[t.type]}.`, '#/news');
   }
 }
+// ---------- قيادة الذكاء الاصطناعي للحرب: هجمات فعلية + استسلام عند الخسارة ----------
+// الذكاء يشن معارك حقيقية بنفسه (مهاجمًا ومدافعًا بهجوم مضاد): قوات + أسلحة الترسانة
+// باستراتيجية حسب شخصيته + مدينة مستهدفة + اتجاه — وعند خسارة أكثر من النصف يطلب الاستسلام.
+const AI_BATTLE_STRATEGIES = {
+  expansionist: ['blitz', 'assault', 'artillery'],
+  balanced: ['assault', 'artillery', 'siege'],
+  conservative: ['siege', 'artillery', 'guerrilla'],
+};
+const AI_ATTACK_DIRECTIONS = ['الشمال', 'الجنوب', 'الشرق', 'الغرب', 'الشمال الشرقي', 'الجنوب الغربي'];
+// أسلحة المعركة للذكاء: حتى 6 أصناف من الترسانة — تصفية غير المتاح تاريخيًا + قصّ الكمية لسقف المخزون
+async function aiPickBattleWeapons(cc) {
+  const picks = await aiPickWeapons(cc, 6, 500);
+  if (!picks.length) return picks;
+  const ids = [...new Set(picks.map((p) => parseInt(p.id, 10)).filter((n) => n > 0))];
+  if (!ids.length) return [];
+  const rows = await all(`SELECT id, name, quantity FROM weapons WHERE id IN (${ids.join(',')})`);
+  const byId = new Map(rows.map((r) => [Number(r.id), r]));
+  let gameYear = 1900;
+  try {
+    const gs = await gameState();
+    const base = gs.started_at || Date.now();
+    gameYear = gameDateOf(base, base + (gs.elapsed || 0)).year;
+  } catch (e) { /* سنة افتراضية */ }
+  const out = [];
+  for (const p of picks) {
+    const w = byId.get(Number(p.id));
+    if (!w) continue;
+    if (!weaponAvailability({ name: w.name }, gameYear).available) continue;
+    const cap = w.quantity == null ? 30 : Math.max(0, Number(w.quantity) || 0);
+    const qty = Math.min(p.qty, cap);
+    if (qty >= 1) out.push({ id: p.id, qty });
+  }
+  return out;
+}
+function aiChooseBattleStrategy(strategy, losing) {
+  const pool = AI_BATTLE_STRATEGIES[strategy] || AI_BATTLE_STRATEGIES.balanced;
+  if (losing && Math.random() < 0.5) return 'blitz'; // الخاسر يقامر بهجوم خاطف
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+async function aiConductWar(cc, strategy, actor) {
+  const myWars = await all(`SELECT * FROM wars WHERE status='active' AND (attacker_code=$1 OR defender_code=$1)`, [cc]);
+  if (!myWars.length) return;
+  const gNow = await gameNow();
+  const hp = await getHP(cc).catch(() => null);
+  const hpRatio = hp && hp.max_hp > 0 ? hp.hp / hp.max_hp : 1;
+  for (const w of myWars) {
+    const enemy = w.attacker_code === cc ? w.defender_code : w.attacker_code;
+    // أ) قبول فوري لأي عرض سلام/استسلام قائم من الطرف الآخر
+    if (w.proposed_by && w.proposed_by !== cc) {
+      try { await peaceInternal(w.id, cc, actor); } catch (e) { /* */ }
+      continue;
+    }
+    // ب) الاستسلام: خسارة أكثر من النصف (صحة الأمة < 50%) — طلب استسلام بدل القتال حتى الاستعمار
+    if (hpRatio < 0.5 && !w.proposed_by) {
+      try { await peaceInternal(w.id, cc, actor, false, true); } catch (e) { /* */ }
+      continue;
+    }
+    // ج) السلام عند التفوق الساحق أو الخسارة الفادحة أو حرب مستنزفة تجاوزت سنة لعبة
+    const myDiff = w.attacker_code === cc ? Number(w.score_a) - Number(w.score_b) : Number(w.score_b) - Number(w.score_a);
+    const monthsAtWar = (gNow - Number(w.started_game_time || gNow)) / GAME_MONTH_MS;
+    if (myDiff >= 50 || myDiff <= -30 || monthsAtWar > 12) {
+      try { await peaceInternal(w.id, cc, actor); } catch (e) { /* عرض قائم أو حرب انتهت */ }
+      continue;
+    }
+    // د) هجوم فعلي — المهاجم يهاجم والمدافع يشن هجومًا مضادًا بقواته ومعداته
+    const mil = await getArmy(cc);
+    if (mil.readiness < 35 || mil.soldiers < 5000) continue;
+    const losing = hpRatio < 0.75 || myDiff < -10;
+    const desperate = hpRatio < 0.6;
+    const attackP = desperate ? 0.95 : strategy === 'expansionist' ? 0.9 : strategy === 'balanced' ? 0.8 : 0.7;
+    if (Math.random() > attackP) continue;
+    const frac = desperate ? 0.5 : losing ? 0.4 : 0.3; // اليائس يرمي بكل ثقله (حتى 50% = سقف المعركة)
+    const units = Math.min(Math.floor(mil.soldiers * frac), 60000);
+    if (units < 1000) continue;
+    let stratKey = aiChooseBattleStrategy(strategy, losing);
+    try {
+      if (capitalDistKm(cc, enemy) > 3000 && await hasNavy(cc) && Math.random() < 0.35) stratKey = 'naval';
+    } catch (e) { /* */ }
+    const defCities = (typeof GEO_CITIES !== 'undefined' && GEO_CITIES && GEO_CITIES[enemy]) || [];
+    const targetCity = defCities.length ? defCities[Math.floor(Math.random() * defCities.length)] : '';
+    const direction = AI_ATTACK_DIRECTIONS[Math.floor(Math.random() * AI_ATTACK_DIRECTIONS.length)];
+    try {
+      await battleInternal(w.id, cc, units, targetCity ? `جبهة ${targetCity}` : '', actor,
+        await aiPickBattleWeapons(cc),
+        { strategy: stratKey, direction, target_city: targetCity });
+    } catch (e) { /* */ }
+  }
+}
 async function aiGovern(cc, strategy, actor = AI_ACTOR, domains = null) {
   const e = await one('SELECT * FROM country_economy WHERE country_code=$1', [cc]);
   if (!e || e.revolt_active) return; // ثورة شعبية = شلل — لا جباية ولا استثمار
@@ -4941,31 +5056,10 @@ async function aiGovern(cc, strategy, actor = AI_ACTOR, domains = null) {
     const wmil = await getArmy(cc);
     const stabNow = await getEconStat(cc, 'stability', 70);
     const gNow = await gameNow();
+    // قيادة الحرب: هجمات فعلية (مهاجم/مدافع) + استسلام عند خسارة النصف + سلام عند الاستنزاف
+    // يعمل على كل الحروب الناشطة — الجديدة والقائمة مسبقًا
+    await aiConductWar(cc, strategy, actor);
     let myWars = await all(`SELECT * FROM wars WHERE status='active' AND (attacker_code=$1 OR defender_code=$1)`, [cc]);
-    // السلام: تفوق ساحق (فرض بتعويضات)، خسارة فادحة، أو حرب مستنزفة تجاوزت سنة لعبة
-    // (الاستعمار الآن تلقائي عند نفاد HP — لا حاجة لخطوة منفصلة)
-    for (const w of myWars) {
-      const myDiff = w.attacker_code === cc ? Number(w.score_a) - Number(w.score_b) : Number(w.score_b) - Number(w.score_a);
-      const monthsAtWar = (gNow - Number(w.started_game_time || gNow)) / GAME_MONTH_MS;
-      if (myDiff >= 50 || myDiff <= -30 || monthsAtWar > 12) {
-        try {
-          await peaceInternal(w.id, cc, actor);
-        } catch (e) { /* عرض قائم أو حرب انتهت */ }
-      }
-    }
-    myWars = await all(`SELECT * FROM wars WHERE status='active' AND (attacker_code=$1 OR defender_code=$1)`, [cc]);
-    // المعارك: دور المهاجم فقط — هجوم شهري محسوب عند الجاهزية الكافية + أسلحة تلقائية من الترسانة
-    for (const w of myWars) {
-      if (w.attacker_code !== cc) continue;
-      const a2 = await getArmy(cc);
-      if (a2.readiness > 45 && a2.soldiers > 8000 && Math.random() < 0.6) {
-        const units = Math.min(Math.floor(a2.soldiers * 0.25), 40000);
-        if (units >= 1000) {
-          try { await battleInternal(w.id, cc, units, '', actor, await aiPickWeapons(cc)); }
-          catch (e) { /* */ }
-        }
-      }
-    }
     // إعلان الحرب: التوسعيون (ونادرًا المتوازنون) — بتفوق عددي واضح ومنطقية جغرافية فقط
     const busy = myWars.length > 0;
     if (!busy) {
@@ -5056,11 +5150,13 @@ if (process.env.EXPOSE_INTERNALS) {
     cityMaxHP, ensureCityHP, damageCity, getCityDamage,
     battleInternal, colonizeByHP, maybeColonizeOnZeroHP,
     collectCompanyInternal, getArmy, setArmyStat, STRATEGIES, WEAPON_FP,
+    rewardTreatySigned, retroTreatyReputation, peaceInternal, aiConductWar, aiPickBattleWeapons,
     initDb,
   };
 }
 (async () => {
   await initDb();
   try { await initAiNations(); } catch (e) { console.error('ai_nations:', e.message); }
+  try { await retroTreatyReputation(); } catch (e) { /* احتساب رجعي لمعادلة السمعة */ }
   app.listen(PORT, () => console.log(`📰 جريدة أرجوس تعمل على http://localhost:${PORT}`));
 })();
