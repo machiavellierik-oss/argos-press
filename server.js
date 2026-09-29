@@ -372,10 +372,16 @@ app.get('/api/conflict', ah(async (req, res) => {
   res.json({ updated: now, window_days: 30, rows });
 }));
 
-// الدول المحجوزة من طرف لاعبين (لمنع تكرار اختيار نفس الدولة)
+// الدول المحجوزة من طرف لاعبين بشر (مقفولة) مقابل الدول التي يديرها حاكم ذكي (متاحة للحجز الفوري)
 app.get('/api/taken-countries', ah(async (req, res) => {
-  const rows = await all("SELECT DISTINCT country_code FROM users WHERE role NOT IN ('system','developer')");
-  res.json(rows.map((r) => r.country_code));
+  const rows = await all("SELECT DISTINCT country_code FROM users WHERE country_code IS NOT NULL AND role NOT IN ('system','developer','ai_embassy')");
+  const taken = new Set(rows.map((r) => r.country_code));
+  let ai_governed = [];
+  try {
+    const aiRows = await all('SELECT country_code FROM ai_nations WHERE enabled=1');
+    ai_governed = aiRows.map((r) => r.country_code).filter((c) => !taken.has(c));
+  } catch (e) { /* الجدول غير جاهز بعد */ }
+  res.json({ taken: [...taken], ai_governed });
 }));
 
 // ---------- الملفات الاستخباراتية (إنجازات اللاعبين) ----------
@@ -469,6 +475,14 @@ app.post('/api/register', ah(async (req, res) => {
   );
   const uid = r.id;
   await q('INSERT INTO dossiers (user_id, updated_at) VALUES ($1,$2) ON CONFLICT DO NOTHING', [uid, Date.now()]);
+  // لو الدولة كانت تُدار بحاكم ذكي — يتوقف فورًا ويرث اللاعب ما بناه
+  try {
+    const ai = await one('SELECT enabled FROM ai_nations WHERE country_code=$1', [country_code]);
+    if (ai && ai.enabled) {
+      await q('UPDATE ai_nations SET enabled=0, updated_at=$1 WHERE country_code=$2', [Date.now(), country_code]);
+      await audit('ai_nation', String(username), `${cname(country_code)}: لاعب بشري حجز الدولة — توقف الحاكم الذكي فورًا`);
+    }
+  } catch (e) { /* تجميلي */ }
   await setSession(res, uid);
   res.json({ ok: true, role });
 }));

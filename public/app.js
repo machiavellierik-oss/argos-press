@@ -1840,16 +1840,23 @@ async function doLogin() {
   } catch (e) { msg(e.message, false); }
 }
 async function vRegister() {
-  let taken = [];
-  try { taken = await api('GET', '/taken-countries'); } catch (e) {}
+  let taken = [], aiGoverned = [];
+  try {
+    const t = await api('GET', '/taken-countries');
+    if (Array.isArray(t)) { taken = t; } else { taken = t.taken || []; aiGoverned = t.ai_governed || []; }
+  } catch (e) {}
+  const aiSet = new Set(aiGoverned);
   app.innerHTML = `<div class="auth">
     <div class="a-logo"><img src="/logo.jpg" alt="أرجوس"></div>
-    <h2>انضم إلى أرجوس</h2><p class="a-sub">أنشئ حساب لاعب واحجز دولتك — كل دولة للاعب واحد فقط</p><div id="msg"></div>
+    <h2>انضم إلى أرجوس</h2><p class="a-sub">أنشئ حساب لاعب واحجز دولتك — الدول المحجوزة من لاعبين مقفولة، والدول التي يديرها حاكم ذكي 🤖 متاحة للحجز الفوري</p><div id="msg"></div>
     <div class="field"><input id="username" dir="ltr" placeholder="اسم المستخدم (إنجليزي، 3-20)"></div>
     <div class="field"><input id="email" type="email" dir="ltr" placeholder="البريد الإلكتروني"></div>
     <div class="field"><input id="password" type="password" placeholder="كلمة المرور (6 أحرف على الأقل)"></div>
     <div class="field"><label>الدولة التي ستلعب بها</label><select id="country">
-      ${COUNTRIES.map((c) => `<option value="${c.code}"${taken.includes(c.code) ? ' disabled' : ''}>${c.flag} ${c.name}${taken.includes(c.code) ? ' — محجوزة' : ''}</option>`).join('')}</select></div>
+      ${COUNTRIES.map((c) => {
+        const isTaken = taken.includes(c.code), isAI = aiSet.has(c.code);
+        return `<option value="${c.code}"${isTaken ? ' disabled' : ''}>${c.flag} ${c.name}${isTaken ? ' — محجوزة 🔒' : isAI ? ' — 🤖 تُدار بحاكم ذكي (متاحة للحجز)' : ''}</option>`;
+      }).join('')}</select></div>
     <button class="btn" onclick="doRegister()">إنشاء الحساب</button>
     <p class="swap">لديك حساب؟ <a href="#/login">سجّل الدخول</a></p></div>`;
 }
