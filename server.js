@@ -1353,6 +1353,16 @@ async function addReputation(cc, delta) {
   await q('UPDATE country_diplo SET reputation=$1, updated_at=$2 WHERE country_code=$3', [nv, Date.now(), cc]);
   return nv;
 }
+// معادلة السمعة الدبلوماسية: كل معاهدة تجارية أو عدم اعتداء ناجحة = +5 سمعة لكلا الطرفين
+const REPUTATION_REWARD_TYPES = new Set(['trade', 'non_aggression']);
+async function rewardTreatySigned(t) {
+  if (!REPUTATION_REWARD_TYPES.has(t.type)) return null;
+  const fromRep = await addReputation(t.from_code, 5);
+  const toRep = await addReputation(t.to_code, 5);
+  await audit('treaty_reputation', 'النظام',
+    `معاهدة ناجحة (${TREATY_TYPES[t.type]}) بين ${cname(t.from_code)} و${cname(t.to_code)} — +5 سمعة دبلوماسية لكليهما`);
+  return { from: fromRep, to: toRep };
+}
 async function activeTreaty(a, b, type) {
   return one(`SELECT * FROM treaties WHERE status='active' AND type=$3 AND
     ((from_code=$1 AND to_code=$2) OR (from_code=$2 AND to_code=$1))`, [a, b, type]);
@@ -1853,11 +1863,12 @@ app.post('/api/treaties/:id/accept', ah(auth), ah(async (req, res) => {
   if (!dev && req.user.country_code !== t.to_code) return res.status(403).json({ error: 'غير مصرح' });
   const g = await gameNow();
   await q(`UPDATE treaties SET status='active', decided_game_time=$1 WHERE id=$2`, [g, t.id]);
+  const rw = await rewardTreatySigned(t);
   await emitEvent('treaty_signed', t.from_code, t.to_code,
     `توقيع ${TREATY_TYPES[t.type]} بين ${cname(t.from_code)} و${cname(t.to_code)}`, { treaty_id: t.id });
   await audit('treaty_accept', req.user.username, `قبول معاهدة #${t.id} (${t.type})`, req);
   await notifyCountry(t.from_code, 'treaty', `قُبِلت معاهدتك!`,
-    `${cname(t.to_code)} قبلت: ${TREATY_TYPES[t.type]}.`, '#/news');
+    `${cname(t.to_code)} قبلت: ${TREATY_TYPES[t.type]}.${rw ? ' +5 سمعة دبلوماسية لكليكما.' : ''}`, '#/news');
   res.json({ ok: true });
 }));
 app.post('/api/treaties/:id/reject', ah(auth), ah(async (req, res) => {
@@ -4801,11 +4812,12 @@ async function respondTreaty(t, accept, actor) {
   const cc = t.to_code;
   if (accept) {
     await q(`UPDATE treaties SET status='active', decided_game_time=$1 WHERE id=$2`, [g, t.id]);
+    const rw = await rewardTreatySigned(t);
     await emitEvent('treaty_signed', t.from_code, t.to_code,
       `توقيع ${TREATY_TYPES[t.type]} بين ${cname(t.from_code)} و${cname(t.to_code)}`, { treaty_id: t.id });
     await audit('treaty_accept', actor, `${cname(cc)} قبلت ${TREATY_TYPES[t.type]} من ${cname(t.from_code)}`);
     await notifyCountry(t.from_code, 'treaty', `قُبِلت معاهدتك!`,
-      `${cname(t.to_code)} قبلت: ${TREATY_TYPES[t.type]}.`, '#/news');
+      `${cname(t.to_code)} قبلت: ${TREATY_TYPES[t.type]}.${rw ? ' +5 سمعة دبلوماسية لكليكما.' : ''}`, '#/news');
   } else {
     await q(`UPDATE treaties SET status='rejected', decided_game_time=$1 WHERE id=$2`, [g, t.id]);
     await audit('treaty_reject', actor, `${cname(cc)} رفضت ${TREATY_TYPES[t.type] || t.type} من ${cname(t.from_code)}`);
